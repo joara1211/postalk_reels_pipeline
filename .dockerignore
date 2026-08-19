@@ -1,0 +1,10 @@
+.git
+quote-video-prompt/
+output/
+assets/videos/
+assets/bgm/
+assets/caption/
+tests/
+__pycache__/
+*.pyc
+.venv/
