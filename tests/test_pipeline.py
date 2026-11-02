@@ -80,6 +80,19 @@ class TestRunPipelineDeadline(unittest.TestCase):
         kwargs = self.mock_compose.call_args.kwargs
         self.assertEqual(kwargs["transition_type"], "fade")
 
+    def test_christmas_concept_passes_its_overlay_image(self):
+        christmas_request = RenderRequest(**{**self.request.__dict__, "concept": "christmas"})
+        run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertEqual(
+            kwargs["overlay_path"], config.REPO_ROOT / "assets" / "overlay" / "christmas_border_placeholder.png"
+        )
+
+    def test_simple_concept_has_no_overlay(self):
+        run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertIsNone(kwargs["overlay_path"])
+
     def test_accepts_a_plain_dict_request_too(self):
         import json
 

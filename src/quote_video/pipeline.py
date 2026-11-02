@@ -130,6 +130,8 @@ def run_pipeline(
 
     bgm_path = config.REPO_ROOT / template["audio"]["bgm"]
     transition_cfg = render_cfg["transition"]
+    overlay_cfg = render_cfg.get("overlay")
+    overlay_path = config.REPO_ROOT / overlay_cfg["image"] if overlay_cfg else None
 
     if on_stage:
         on_stage("composing")
@@ -145,6 +147,7 @@ def run_pipeline(
         margin_v=subtitle_cfg["margin_v"],
         transition_type=transition_cfg["type"],
         transition_duration=transition_cfg["duration_sec"],
+        overlay_path=overlay_path,
         font_dir=config.FONT_DIR,
         width=canvas["width"],
         height=canvas["height"],

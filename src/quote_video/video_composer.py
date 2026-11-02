@@ -207,6 +207,7 @@ def build_ffmpeg_command(
     bgm_gain_db: float | None = None,
     transition_type: str = "fade",
     transition_duration: float = 0.0,
+    overlay_path: Path | None = None,
     font_dir: Path = config.FONT_DIR,
     width: int = config.VIDEO_WIDTH,
     height: int = config.VIDEO_HEIGHT,
@@ -231,7 +232,18 @@ def build_ffmpeg_command(
     stretched/fit to `target_duration + transition_duration` — the extra
     `transition_duration` at its tail is exactly what gets folded into the
     next scene's crossfade, so the combined result lands back on the
-    original total (see _xfade_chain())."""
+    original total (see _xfade_chain()).
+
+    `overlay_path`, when given, is a static RGBA image (e.g. a decorative
+    border/frame — see templates/christmas.json's "render.overlay")
+    composited over the whole video after captions are burned in but
+    before the start/end fade, so the overlay fades in/out along with
+    everything else instead of popping in over a black frame. It's scaled
+    to the output canvas, so its own transparent/opaque areas decide what
+    shows through — a full-bleed frame with a transparent center is the
+    expected shape, not a small positioned sticker (ffmpeg's `overlay`
+    filter could position something smaller as a future "concept wants a
+    corner badge instead" change, but that's not what's wired up here)."""
     if not scene_clips:
         raise ValueError("scene_clips must not be empty")
 
@@ -266,14 +278,24 @@ def build_ffmpeg_command(
 
     subtitle_arg = _escape_filter_path(subtitle_path)
     fontsdir_arg = _escape_filter_path(font_dir)
+    captioned_label = "voverlay_src" if overlay_path else "vfaded_src"
     filters.append(
         f"[vconcat]subtitles='{subtitle_arg}':fontsdir='{fontsdir_arg}':"
-        f"force_style='FontName={font_name},MarginV={margin_v}',"
-        f"fade=t=in:st=0:d={fade_duration},"
-        f"fade=t=out:st={fade_out_start}:d={fade_duration}[vout]"
+        f"force_style='FontName={font_name},MarginV={margin_v}'[{captioned_label}]"
     )
 
     bgm_input_index = len(scene_clips)
+    overlay_input_index = bgm_input_index + 1
+
+    if overlay_path:
+        filters.append(f"[{overlay_input_index}:v]scale={width}:{height}[voverlay_img]")
+        filters.append(f"[{captioned_label}][voverlay_img]overlay=0:0[vfaded_src]")
+
+    filters.append(
+        f"[vfaded_src]fade=t=in:st=0:d={fade_duration},"
+        f"fade=t=out:st={fade_out_start}:d={fade_duration}[vout]"
+    )
+
     filters.append(
         f"[{bgm_input_index}:a]volume={bgm_gain_db}dB,aloop=loop=-1:size=2147483647,"
         f"atrim=duration={total_duration:.6f},asetpts=PTS-STARTPTS,"
@@ -284,6 +306,8 @@ def build_ffmpeg_command(
     for clip in scene_clips:
         command += ["-i", str(clip.media_path)]
     command += ["-i", str(bgm_path)]
+    if overlay_path:
+        command += ["-i", str(overlay_path)]
     command += [
         "-filter_complex", ";".join(filters),
         "-map", "[vout]",

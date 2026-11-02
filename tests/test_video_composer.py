@@ -178,6 +178,37 @@ class TestBuildFfmpegCommand(unittest.TestCase):
         cmd = self._build()
         self.assertEqual(cmd[cmd.index("-movflags") + 1], "+faststart")
 
+    def test_no_overlay_input_or_filter_when_overlay_path_omitted(self):
+        cmd = self._build()
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertNotIn("overlay", filter_complex)
+        self.assertNotIn(str(Path("deco.png")), cmd)
+
+    def test_overlay_path_adds_a_third_input_after_bgm(self):
+        cmd = self._build(overlay_path=Path("deco.png"))
+        i_bgm = cmd.index(str(self.bgm))
+        i_overlay = cmd.index(str(Path("deco.png")))
+        self.assertLess(i_bgm, i_overlay)
+        # exactly one -i flag immediately precedes each input path
+        self.assertEqual(cmd[cmd.index(str(Path("deco.png"))) - 1], "-i")
+
+    def test_overlay_is_scaled_to_canvas_and_composited_after_captions(self):
+        cmd = self._build(overlay_path=Path("deco.png"), width=1080, height=1920)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertIn("scale=1080:1920[voverlay_img]", filter_complex)
+        self.assertIn("overlay=0:0", filter_complex)
+        # subtitles must still land before the overlay compositing step
+        subtitle_pos = filter_complex.index("subtitles=")
+        overlay_pos = filter_complex.index("overlay=0:0")
+        self.assertLess(subtitle_pos, overlay_pos)
+
+    def test_overlay_still_fades_in_and_out_with_the_rest(self):
+        cmd = self._build(overlay_path=Path("deco.png"), fade_duration=0.5)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        overlay_pos = filter_complex.index("overlay=0:0")
+        fade_pos = filter_complex.index("fade=t=in:st=0:d=0.5")
+        self.assertLess(overlay_pos, fade_pos)
+
     def test_output_path_is_last_argument(self):
         cmd = self._build()
         self.assertEqual(cmd[-1], str(self.output))
