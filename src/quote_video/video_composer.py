@@ -346,3 +346,36 @@ def compose_video(
     )
     _run(command, deadline=deadline, check=True)
     return output_path
+
+
+def build_thumbnail_command(
+    video_path: Path, output_path: Path, *, at_sec: float = 0.3, quality: int = 2
+) -> list[str]:
+    """Build the ffmpeg argv that grabs a single JPG frame from the
+    already-composed final MP4 — not the raw hook footage, since the final
+    video is already cropped/letterboxed to the right 1080x1920 canvas, so
+    grabbing straight from it needs no extra scaling. `at_sec` defaults to
+    just past the start (not frame 0) to skip the fade-in. Pure/testable:
+    does not touch the filesystem or require ffmpeg installed."""
+    return [
+        "ffmpeg", "-y",
+        "-ss", f"{at_sec:.3f}",
+        "-i", str(video_path),
+        "-frames:v", "1",
+        "-update", "1",
+        "-q:v", str(quality),
+        str(output_path),
+    ]
+
+
+def generate_thumbnail(
+    video_path: Path, output_path: Path, *, at_sec: float = 0.3, deadline: float | None = None
+) -> Path:
+    """docs/reels-api-spec.md: "썸네일은 훅 장면에서 뽑은 1080×1920 JPG." The
+    composed video's first ~2s *is* the hook scene (see templates.py's
+    scene order), so a frame near the start always comes from it."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = build_thumbnail_command(video_path, output_path, at_sec=at_sec)
+    _run(command, deadline=deadline, check=True)
+    return output_path

@@ -13,8 +13,10 @@ from src.quote_video.video_composer import (
     _run,
     _xfade_chain,
     build_ffmpeg_command,
+    build_thumbnail_command,
     compose_video,
     compute_bgm_gain_db,
+    generate_thumbnail,
 )
 
 
@@ -237,6 +239,38 @@ class TestComposeVideo(unittest.TestCase):
                 margin_v=440,
             )
             mock_probe_vol.assert_not_called()
+
+
+class TestBuildThumbnailCommand(unittest.TestCase):
+    def test_grabs_a_single_frame_at_the_given_timestamp(self):
+        cmd = build_thumbnail_command(Path("final.mp4"), Path("thumb.jpg"), at_sec=0.3)
+        self.assertIn("-ss", cmd)
+        self.assertEqual(cmd[cmd.index("-ss") + 1], "0.300")
+        self.assertIn(str(Path("final.mp4")), cmd)
+        self.assertEqual(cmd[-1], str(Path("thumb.jpg")))
+
+    def test_frames_v_1_and_update_flag_force_a_single_image(self):
+        # without -update, ffmpeg's image2 muxer wants a %d pattern and
+        # falls back (with a warning) to overwriting the literal filename —
+        # -update 1 makes "write exactly one image to this path" explicit.
+        cmd = build_thumbnail_command(Path("final.mp4"), Path("thumb.jpg"))
+        self.assertEqual(cmd[cmd.index("-frames:v") + 1], "1")
+        self.assertEqual(cmd[cmd.index("-update") + 1], "1")
+
+    def test_default_at_sec_skips_the_fade_in(self):
+        cmd = build_thumbnail_command(Path("final.mp4"), Path("thumb.jpg"))
+        self.assertGreater(float(cmd[cmd.index("-ss") + 1]), 0.0)
+
+
+class TestGenerateThumbnail(unittest.TestCase):
+    def test_creates_parent_dir_and_runs_ffmpeg(self):
+        with patch("src.quote_video.video_composer._run") as mock_run:
+            with patch("src.quote_video.video_composer.Path.mkdir") as mock_mkdir:
+                generate_thumbnail(Path("final.mp4"), Path("out/thumb.jpg"))
+        mock_mkdir.assert_called_once()
+        mock_run.assert_called_once()
+        command = mock_run.call_args.args[0]
+        self.assertEqual(command[0], "ffmpeg")
 
 
 class TestRemainingSeconds(unittest.TestCase):

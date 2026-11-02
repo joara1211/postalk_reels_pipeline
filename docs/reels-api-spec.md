@@ -204,8 +204,8 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
   "status": "done",
   "progress": {
     "stage": "uploading",
-    "stage_index": 4,
-    "stage_total": 4,
+    "stage_index": 3,
+    "stage_total": 3,
     "label": "거의 다 됐어요",
     "percent": 100
   },

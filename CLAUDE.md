@@ -51,10 +51,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 실패 대체 (한 단계가 실패해도 가능하면 완성)
 
-- LLM 실패: 1회 재시도 → 템플릿 기본 문구 + 가게명·메뉴명으로 채우고 `is_fallback: true`
-- 장면 영상 없음/읽기 실패: 같은 메뉴의 다른 장면 → 다른 장면 영상의 다른 구간으로 대체, `fallbacks`에 기록
-- FFmpeg 실패: 1회 자동 재시도 → `RENDER_FAILED`
-- 쓸 수 있는 영상이 하나도 없음: `NO_USABLE_MEDIA`
+- **(완료)** LLM 실패: 1회 재시도 → 템플릿 기본 문구 + 가게명·메뉴명으로 채우고 `is_fallback: true`
+- 장면 영상 없음/읽기 실패: 같은 메뉴의 다른 장면 → 다른 장면 영상의 다른 구간으로 대체, `fallbacks`에 기록 —
+  **아직 미구현.** 지금은 장면 미디어가 없으면 바로 `NO_USABLE_MEDIA`로 실패 처리하고, `result.fallbacks`는 항상 빈 배열이다.
+- **(완료)** FFmpeg 실패: 1회 자동 재시도 → `RENDER_FAILED` (`api._run_render_with_one_retry()`)
+- **(완료)** 쓸 수 있는 영상이 하나도 없음: `NO_USABLE_MEDIA`
 
 ## 기존 코드에서 반드시 지킬 것 (시행착오로 얻은 것)
 
@@ -90,13 +91,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 새로 만들 것
 
-- **(완료)** LLM 대본 생성 로직(`script_generator.generate_script()`): 장면별 자막, 캡션(≤2,200자), 해시태그(≤30개), 가격 추출.
-  `/reels/scripts` 엔드포인트 자체(비동기 job, script_id 발급·조회)는 아직 — 그건 4단계 FastAPI 작업.
-- 콘셉트별 전환(xfade)·자막 스타일 (2종, 디자인 미정이므로 JSON 값으로 교체 가능하게) — xfade는 완료, 스타일은 디자인 대기 중
-- 썸네일(hook 장면에서 1080x1920 JPG)
-- 진행 단계 보고: `preparing → composing → uploading` (TTS 없으므로 narrating 단계 자체가 없다), 한국어 label 포함
-- S3 다운로드/업로드, Next.js 콜백 전송
-- 오류 코드: `CAPTION_TOO_LONG`, `SCENE_MISMATCH`, `ALREADY_RENDERING`, `NO_USABLE_MEDIA`, `RENDER_FAILED`, `TIMEOUT`
+- **(완료)** LLM 대본 생성 로직(`script_generator.generate_script()`) + `POST /reels/scripts`/`GET /reels/scripts/{id}` 엔드포인트(`api.py`, 백그라운드 처리).
+- **(완료)** 콘셉트별 전환(xfade) — 자막 스타일 자체는 디자인 대기 중(JSON 값으로 교체 가능하게 되어 있음)
+- **(완료)** 썸네일(hook 장면에서 1080x1920 JPG) — 원본 훅 영상이 아니라 합성 끝난 최종 MP4 초반 프레임에서 뽑는다(`video_composer.generate_thumbnail()`), 이미 크롭된 상태라 추가 스케일링이 필요 없어서.
+- **(완료)** 진행 단계 보고: `preparing → composing → uploading` (TTS 없으므로 narrating 단계 자체가 없다), 한국어 label 포함.
+- **(완료, 로컬 가정)** 업로드/다운로드·콜백 전송 — S3 대신 `STORAGE_ROOT` 환경변수가 가리키는 로컬 디렉터리를 버킷처럼 쓴다
+  (`media[].key`/`results/.../reel.mp4` 그대로 `STORAGE_ROOT / key`로 resolve). 콜백은 `NEXT_BASE_URL`이 설정된 경우에만 실제로 보내고,
+  안 보내면 조용히 스킵(로컬 개발용). 둘 다 "아직 팀과 확정 안 된 것" 참고.
+- **(완료)** 오류 코드: `CAPTION_TOO_LONG`, `SCENE_MISMATCH`, `ALREADY_RENDERING`, `NO_USABLE_MEDIA`, `RENDER_FAILED`, `TIMEOUT` 전부 구현.
 
 ## 작업 순서
 
@@ -104,17 +106,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    → `templates/simple.json` 기반 13초 MP4. 순서: 템플릿 JSON 스키마 → 9:16 크롭 정규화 → 장면 길이 맞춤 → ASS 자막 → BGM.
    길이가 제각각(2초/5초/15초)인 영상과 가로 영상으로 테스트했다.
 2. **(완료)** 메뉴 2·3개 장면 규칙, 전환 효과(xfade), 콘셉트 2종(`christmas.json` 추가)
-3. **(완료)** LLM 대본 생성 (`script_generator.py`) — 단, FastAPI `/reels/scripts` 엔드포인트 자체는 4단계
-4. **(다음)** FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체
-5. S3 연동, Docker, 속도 측정(목표 30초)
+3. **(완료)** LLM 대본 생성 (`script_generator.py`)
+4. **(완료)** FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체 (`api.py`, `job_store.py`) —
+   업로드/결과 저장은 S3가 아니라 로컬 `STORAGE_ROOT`를 S3 버킷처럼 흉내만 냄. 작업 상태도 프로세스 재시작하면 날아가는 인메모리 dict.
+5. **(다음)** S3 연동, Docker, 속도 측정(목표 30초) — `STORAGE_ROOT`를 실제 S3 get/put으로, 인메모리 `JobStore`를 영속 저장소로 교체
 
 각 단계마다 unittest를 추가한다. 기존 테스트 중 폐기된 규칙(2초 컷, 컷당 자막 2줄, 현장음)에 묶인 것은 지우지 말고 새 규칙에 맞게 고치거나, 지워야 하면 사용자에게 먼저 알린다.
 
 ## 아직 팀과 확정 안 된 것 (가정으로 구현하되, 바꾸기 쉽게)
 
-- 작업 등록 방식: Next.js → 미디어 서버 직접 호출 vs SQS
-- 콜백 경로·서버 간 인증 방식 (가정: `POST {NEXT_BASE_URL}/api/internal/reels/callback`, 헤더 API 키)
-- S3 키 규칙·버킷 이름 (가정: `uploads/{user_id}/{ad_id}/{scene_index}.mp4`, `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg`)
+- 작업 등록 방식: Next.js → 미디어 서버 직접 호출 vs SQS — 지금 구현은 직접 호출(FastAPI 엔드포인트) 전제
+- 콜백 경로·서버 간 인증 방식 — 구현은 `POST {NEXT_BASE_URL}/api/internal/reels/callback` + 헤더 `X-Internal-Api-Key`로
+  가정하고 `job_store.send_callback()`에 이미 짜 놓았다. `NEXT_BASE_URL`/`REELS_CALLBACK_API_KEY` 환경변수로만 바뀐다 — 실제
+  경로·헤더 이름이 확정되면 그 함수 하나만 고치면 된다. `NEXT_BASE_URL` 미설정 시 콜백은 조용히 스킵(로컬 개발 지원용).
+- S3 키 규칙·버킷 이름 — 구현은 `uploads/{user_id}/{ad_id}/{scene_index}.mp4`, `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg`
+  가정대로 키를 만들지만, 실제 S3가 아니라 `STORAGE_ROOT`(환경변수, 기본값 `./storage`) 밑 로컬 파일로 읽고 쓴다.
+  `media[].storage`(s3/supabase) 필드는 받기만 하고 무시한다 — S3 연동(5단계)에서 `api.py`의 파일 읽기/쓰기 지점만 바꾸면 된다.
+- 작업 상태 저장소 — 지금은 `job_store.JobStore`가 프로세스 메모리의 dict다. 재시작하면 모든 진행 중 작업이 사라지고,
+  워커를 여러 개 띄우면 서로 다른 메모리를 본다(단일 워커 가정). Docker/다중 워커로 갈 때(5·6단계) Supabase나 Redis 같은
+  공유 저장소로 바꿔야 한다.
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
 - LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(표준 라이브러리 `urllib`만 사용, SDK 의존성 없음)가 기본값이지만 placeholder다.
   `LlmClient` 프로토콜만 맞추면 다른 제공자로 교체 가능(`generate_script(..., llm_client=...)`), `ANTHROPIC_API_KEY`/`LLM_MODEL` 환경변수로 키·모델 교체.
@@ -122,11 +132,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 명령어
 ```bash
-python -m unittest discover -s tests -v   # 테스트 (stdlib unittest)
+pip install -r requirements.txt           # fastapi, pydantic, uvicorn, httpx (stdlib 외 첫 의존성, 4단계부터)
+python -m unittest discover -s tests -v    # 테스트 (stdlib unittest + FastAPI TestClient)
 
-# CLI (POST /reels/renders 본문을 JSON 파일로 저장해 로컬 테스트, FastAPI 전까지 메인 진입점)
+# FastAPI 서버 (docs/reels-api-spec.md의 4개 엔드포인트 + /healthz)
+python -m uvicorn src.quote_video.api:app --reload
+
+# CLI (POST /reels/renders 본문을 JSON 파일로 저장해 로컬 테스트, 서버 없이 한 번 렌더)
 python -m src.quote_video.pipeline --request tests/fixtures/render_request_1menu.json --media-root assets/videos --output output/reel.mp4
 ```
 
 개발 환경은 Windows(winget으로 설치한 FFmpeg), 배포는 Linux Docker다. 경로는 `pathlib`로 다루고 OS 의존 코드를 넣지 않는다.
-API 키(LLM, AWS)는 `.env`로만 받고 커밋하지 않는다.
+API 키(LLM, AWS)는 `.env`로만 받고 커밋하지 않는다. 서버 환경변수: `STORAGE_ROOT`(기본 `./storage`), `NEXT_BASE_URL`·
+`REELS_CALLBACK_API_KEY`(콜백, 미설정 시 스킵), `ANTHROPIC_API_KEY`·`LLM_MODEL`(대본 생성).

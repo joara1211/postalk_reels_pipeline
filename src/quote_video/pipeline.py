@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from . import config
 from .errors import NoUsableMediaError
@@ -22,6 +24,12 @@ from .render_request import RenderRequest, build_render_plan
 from .subtitle_sync import CaptionLine, CaptionTiming, write_ass
 from .templates import load_template
 from .video_composer import compose_video
+
+
+@dataclass(frozen=True)
+class PipelineResult:
+    output_path: Path
+    duration_sec: float
 
 
 def run_pipeline(
@@ -32,20 +40,32 @@ def run_pipeline(
     template_dir: Path = config.TEMPLATE_DIR,
     build_dir: Path | None = None,
     timeout_seconds: float | None = config.PIPELINE_TIMEOUT_SECONDS,
-) -> Path:
+    on_stage: Callable[[str], None] | None = None,
+) -> PipelineResult:
     """Run the full pipeline for one render request.
 
     `timeout_seconds` is a wall-clock budget for the whole call, enforced
     via subprocess timeouts (`PipelineTimeoutError`) — pass None to
     disable. Per docs/reels-api-spec.md: hard ceiling 60s, target 30s; the
     60s is what's actually enforced here, 30s is a goal to hit well inside
-    it, not a second timeout."""
+    it, not a second timeout.
+
+    `on_stage`, when given, is called with "preparing" right away and
+    "composing" right before the ffmpeg compose step — api.py uses this to
+    drive GET /reels/renders' progress.stage. There's no separate stage in
+    between: validation (scene/caption checks) already happened
+    synchronously before this function is even called (see api.py), and
+    subtitle-file writing is pure Python and fast enough not to need its
+    own stage."""
     if isinstance(request, dict):
         request = RenderRequest.from_dict(request)
     media_root = Path(media_root)
     output_path = Path(output_path)
     build_dir = Path(build_dir) if build_dir else output_path.parent / "_build"
     deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
+
+    if on_stage:
+        on_stage("preparing")
 
     template = load_template(request.concept, template_dir=template_dir)
     render_scenes = build_render_plan(request, template)
@@ -90,7 +110,10 @@ def run_pipeline(
     bgm_path = config.REPO_ROOT / template["audio"]["bgm"]
     transition_cfg = render_cfg["transition"]
 
-    return compose_video(
+    if on_stage:
+        on_stage("composing")
+
+    output_path = compose_video(
         scene_specs,
         subtitle_path=subtitle_path,
         bgm_path=bgm_path,
@@ -108,6 +131,7 @@ def run_pipeline(
         preset=render_cfg.get("ffmpeg_preset", config.FFMPEG_PRESET),
         deadline=deadline,
     )
+    return PipelineResult(output_path=output_path, duration_sec=sum(d for _, d in scene_specs))
 
 
 def main() -> None:
@@ -122,11 +146,11 @@ def main() -> None:
     args = parser.parse_args()
 
     request = RenderRequest.from_dict(json.loads(args.request.read_text(encoding="utf-8")))
-    output_path = run_pipeline(
+    result = run_pipeline(
         request, args.media_root, args.output,
         timeout_seconds=args.timeout or None,
     )
-    print(f"Wrote {output_path}")
+    print(f"Wrote {result.output_path} ({result.duration_sec:.1f}s)")
 
 
 if __name__ == "__main__":
