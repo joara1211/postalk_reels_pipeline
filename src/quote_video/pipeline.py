@@ -132,6 +132,8 @@ def run_pipeline(
     transition_cfg = render_cfg["transition"]
     overlay_cfg = render_cfg.get("overlay")
     overlay_path = config.REPO_ROOT / overlay_cfg["image"] if overlay_cfg else None
+    animated_overlay_cfg = render_cfg.get("animated_overlay")
+    animated_overlay_path = config.REPO_ROOT / animated_overlay_cfg["video"] if animated_overlay_cfg else None
 
     if on_stage:
         on_stage("composing")
@@ -148,6 +150,7 @@ def run_pipeline(
         transition_type=transition_cfg["type"],
         transition_duration=transition_cfg["duration_sec"],
         overlay_path=overlay_path,
+        animated_overlay_path=animated_overlay_path,
         font_dir=config.FONT_DIR,
         width=canvas["width"],
         height=canvas["height"],

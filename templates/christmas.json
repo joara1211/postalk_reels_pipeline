@@ -59,6 +59,10 @@
       "_note": "임시 플레이스홀더 — 지우(이미지 AI)가 실제 크리스마스 테두리/스티커 디자인을 주면 image 경로만 바꾸면 된다.",
       "image": "assets/overlay/christmas_border_placeholder.png"
     },
+    "animated_overlay": {
+      "_note": "눈 내리는 효과 — 정적 이미지로는 움직임을 못 내서 별도의 투명 루프 영상(3초/90프레임, 매끄럽게 반복)으로 만들었다. 실제 디자인이 나오면 video 경로만 교체하면 된다.",
+      "video": "assets/overlay/christmas_snow.mov"
+    },
     "subtitle": {
       "font_name": "Griun Fromsol",
       "font_file": "assets/font/Griun_Fromsol-Rg.ttf",

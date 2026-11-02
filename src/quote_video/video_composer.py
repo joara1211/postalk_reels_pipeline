@@ -208,6 +208,7 @@ def build_ffmpeg_command(
     transition_type: str = "fade",
     transition_duration: float = 0.0,
     overlay_path: Path | None = None,
+    animated_overlay_path: Path | None = None,
     font_dir: Path = config.FONT_DIR,
     width: int = config.VIDEO_WIDTH,
     height: int = config.VIDEO_HEIGHT,
@@ -243,7 +244,17 @@ def build_ffmpeg_command(
     shows through — a full-bleed frame with a transparent center is the
     expected shape, not a small positioned sticker (ffmpeg's `overlay`
     filter could position something smaller as a future "concept wants a
-    corner badge instead" change, but that's not what's wired up here)."""
+    corner badge instead" change, but that's not what's wired up here).
+
+    `animated_overlay_path`, when given, is a *moving* RGBA video (e.g.
+    falling snow — a static PNG can't show motion) composited the same
+    way, but first: snow sits under the border frame, not over it. It's
+    looped via `-stream_loop -1` at the input level — same idea as BGM's
+    `aloop`, but video needs the input-level flag since there's no video
+    equivalent of the `aloop` filter — so a short seamless-loop clip (see
+    assets/overlay/christmas_snow.mov, 3s/90 frames) can cover a render of
+    any length; the global `-t` at the end trims it along with everything
+    else."""
     if not scene_clips:
         raise ValueError("scene_clips must not be empty")
 
@@ -278,21 +289,31 @@ def build_ffmpeg_command(
 
     subtitle_arg = _escape_filter_path(subtitle_path)
     fontsdir_arg = _escape_filter_path(font_dir)
-    captioned_label = "voverlay_src" if overlay_path else "vfaded_src"
+    current_label = "vcaptioned"
     filters.append(
         f"[vconcat]subtitles='{subtitle_arg}':fontsdir='{fontsdir_arg}':"
-        f"force_style='FontName={font_name},MarginV={margin_v}'[{captioned_label}]"
+        f"force_style='FontName={font_name},MarginV={margin_v}'[{current_label}]"
     )
 
     bgm_input_index = len(scene_clips)
-    overlay_input_index = bgm_input_index + 1
+    next_input_index = bgm_input_index + 1
+
+    if animated_overlay_path:
+        snow_input_index = next_input_index
+        next_input_index += 1
+        filters.append(f"[{snow_input_index}:v]scale={width}:{height}[vsnow_img]")
+        filters.append(f"[{current_label}][vsnow_img]overlay=0:0[vsnow_src]")
+        current_label = "vsnow_src"
 
     if overlay_path:
+        overlay_input_index = next_input_index
+        next_input_index += 1
         filters.append(f"[{overlay_input_index}:v]scale={width}:{height}[voverlay_img]")
-        filters.append(f"[{captioned_label}][voverlay_img]overlay=0:0[vfaded_src]")
+        filters.append(f"[{current_label}][voverlay_img]overlay=0:0[voverlay_src]")
+        current_label = "voverlay_src"
 
     filters.append(
-        f"[vfaded_src]fade=t=in:st=0:d={fade_duration},"
+        f"[{current_label}]fade=t=in:st=0:d={fade_duration},"
         f"fade=t=out:st={fade_out_start}:d={fade_duration}[vout]"
     )
 
@@ -306,6 +327,8 @@ def build_ffmpeg_command(
     for clip in scene_clips:
         command += ["-i", str(clip.media_path)]
     command += ["-i", str(bgm_path)]
+    if animated_overlay_path:
+        command += ["-stream_loop", "-1", "-i", str(animated_overlay_path)]
     if overlay_path:
         command += ["-i", str(overlay_path)]
     command += [

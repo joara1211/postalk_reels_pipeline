@@ -209,6 +209,34 @@ class TestBuildFfmpegCommand(unittest.TestCase):
         fade_pos = filter_complex.index("fade=t=in:st=0:d=0.5")
         self.assertLess(overlay_pos, fade_pos)
 
+    def test_animated_overlay_loops_via_stream_loop_input_flag(self):
+        cmd = self._build(animated_overlay_path=Path("snow.mov"))
+        i_snow = cmd.index(str(Path("snow.mov")))
+        self.assertEqual(cmd[i_snow - 1], "-i")
+        self.assertEqual(cmd[i_snow - 2], "-1")
+        self.assertEqual(cmd[i_snow - 3], "-stream_loop")
+
+    def test_animated_overlay_input_comes_before_static_overlay_input(self):
+        cmd = self._build(animated_overlay_path=Path("snow.mov"), overlay_path=Path("deco.png"))
+        self.assertLess(cmd.index(str(Path("snow.mov"))), cmd.index(str(Path("deco.png"))))
+
+    def test_animated_overlay_composited_before_static_overlay(self):
+        # snow sits under the border frame, not over it.
+        cmd = self._build(animated_overlay_path=Path("snow.mov"), overlay_path=Path("deco.png"))
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertEqual(filter_complex.count("overlay=0:0"), 2)
+        first_overlay = filter_complex.index("overlay=0:0")
+        second_overlay = filter_complex.index("overlay=0:0", first_overlay + 1)
+        self.assertIn("vsnow_img", filter_complex[:first_overlay + 20])
+        self.assertIn("voverlay_img", filter_complex[second_overlay - 40:second_overlay + 20])
+
+    def test_animated_overlay_alone_still_fades_with_the_rest(self):
+        cmd = self._build(animated_overlay_path=Path("snow.mov"), fade_duration=0.5)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        overlay_pos = filter_complex.index("overlay=0:0")
+        fade_pos = filter_complex.index("fade=t=in:st=0:d=0.5")
+        self.assertLess(overlay_pos, fade_pos)
+
     def test_output_path_is_last_argument(self):
         cmd = self._build()
         self.assertEqual(cmd[-1], str(self.output))
