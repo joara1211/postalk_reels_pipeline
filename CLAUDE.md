@@ -42,6 +42,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   **두 콘셉트의 디자인(컷 속도, 전환, 자막 스타일, 색, 폰트, BGM 곡)은 아직 미정이다.** 템플릿 JSON 값으로만 표현하고
   코드에 콘셉트별 분기를 하드코딩하지 않는다. 디자인이 정해지기 전까지는 임시 값(기본 페이드, 흰 글씨+반투명 박스, 임의 BGM)으로 둔다.
   두 콘셉트 모두 **자막 사용(has_captions=true)**. `has_captions` 필드는 프론트 분기용으로 남겨 두되 false인 콘셉트는 현재 없다.
+  **(2026-11-02 추가)** 장식 오버레이(테두리·스티커류)도 콘셉트별 선택 사항으로 지원한다 — `render.overlay.image`에 투명
+  배경 PNG 경로를 넣으면 자막 번인 후·페이드 전에 합성된다(`video_composer.build_ffmpeg_command()`). `christmas.json`에
+  `assets/overlay/christmas_border_placeholder.png`(생성한 임시 테두리)가 걸려있고, `simple.json`은 없음 — 지우가 실제
+  디자인 주면 그 경로만 바꾸면 된다.
 - **TTS는 쓰지 않는다** (2026-11-02 결정, 이전 "TTS 사용" 결정을 뒤집음). 영상에는 음성 내레이션이 없고 자막과 BGM만 있다.
 - **BGM은 쓴다.** 콘셉트별 기본곡 1곡, 사용자 선택 기능 없음. 덕킹 대상(TTS)이 없으므로 덕킹도 없다.
 - **촬영 원본 소리는 모두 제거**한다(기존 코드의 "현장음 유지" 규칙은 폐기).
