@@ -64,11 +64,12 @@
       "video": "assets/overlay/christmas_snow.mov"
     },
     "subtitle": {
+      "_note": "simple.json과 달리 색만 리본/테두리 테마(골드 글씨 + 딥레드 박스)에 맞춰 바꿨다. 폰트·크기는 아직 공통 placeholder.",
       "font_name": "Griun Fromsol",
       "font_file": "assets/font/Griun_Fromsol-Rg.ttf",
       "font_size": 64,
-      "primary_color": "&H00FFFFFF",
-      "back_color": "&H80000000",
+      "primary_color": "&H006EBEE6",
+      "back_color": "&H80161078",
       "border_style": 3,
       "outline": 2,
       "margin_v": 440
