@@ -4,8 +4,7 @@
   "has_captions": true,
   "audio": {
     "bgm": "assets/bgm/MP_맑은 아침 (Short).mp3",
-    "bgm_volume": 0.3,
-    "tts": true
+    "bgm_volume": 0.3
   },
   "scene_rule": {
     "common": [

@@ -46,12 +46,12 @@
 
 | concept | 이름 | 자막(has_captions) | 오디오 |
 | --- | --- | --- | --- |
-| simple | 심플 | 사용 | BGM + TTS 내레이션 |
-| christmas | 크리스마스 | 사용 | BGM + TTS 내레이션 |
+| simple | 심플 | 사용 | BGM |
+| christmas | 크리스마스 | 사용 | BGM |
 
 릴스와 카드뉴스 모두 이 2종 콘셉트를 쓴다. 컷 속도, 전환, 자막 스타일, 색, BGM 곡 같은 디자인은 아직 정해지지 않았다. 모두 템플릿 JSON 값으로만 정하므로, 확정되면 API와 코드 변경 없이 반영한다.
 
-BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지 않는다. TTS가 있는 콘셉트는 내레이션 구간에서 BGM 음량을 자동으로 낮춘다. 촬영 원본 소리는 모두 제거한다.
+BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지 않는다. TTS 내레이션은 쓰지 않는다(2026-11-02 결정) — 영상 소리는 BGM뿐이다. 촬영 원본 소리는 모두 제거한다.
 
 ### GET /reels/templates
 
@@ -64,7 +64,7 @@ BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지
       "concept": "simple",
       "name": "심플",
       "has_captions": true,
-      "audio": { "bgm": "simple_01", "bgm_volume": 0.3, "tts": true },
+      "audio": { "bgm": "simple_01", "bgm_volume": 0.3 },
       "scene_rule": {
         "common": [
           { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 2.0, "caption_max_chars": 14, "min_record_sec": 3, "guide": "대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
@@ -139,7 +139,7 @@ SC-06에 진입하면 status가 done이 될 때까지 조회한다.
 ```
 
 - status: `pending` | `done` | `failed`.
-- `target`은 SC-06 "장면 대상 표시"에 그대로 쓴다. `text`는 자막이자 TTS 내레이션 문장.
+- `target`은 SC-06 "장면 대상 표시"에 그대로 쓴다. `text`는 화면에 뜨는 자막 문장(TTS 없음).
 - LLM이 1회 재시도 후에도 실패하면 기본 문구에 가게명·메뉴명만 넣어 done으로 돌려주고 `is_fallback: true`. failed는 입력값이 잘못된 경우에만 나오며, SC-06 재요청 버튼은 같은 요청을 다시 보낸다.
 - caption·hashtags는 생성 요청에 그대로 넘기고, SC-08에서 사용자가 수정한다. 인스타그램 제한(본문 2,200자, 해시태그 30개) 안에서 만든다.
 
@@ -240,11 +240,10 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
 | stage_index | stage | label (SC-07 문구) |
 | --- | --- | --- |
 | 1 | preparing | 영상을 다듬고 있어요 |
-| 2 | narrating | 목소리를 입히고 있어요 |
-| 3 | composing | 장면과 음악을 합치고 있어요 |
-| 4 | uploading | 거의 다 됐어요 |
+| 2 | composing | 장면과 음악을 합치고 있어요 |
+| 3 | uploading | 거의 다 됐어요 |
 
-- TTS가 없는 콘셉트(현재 없음)는 narrating을 건너뛰고 stage_total이 3. 프론트는 단계 목록을 고정하지 않고 stage_index / stage_total을 그대로 표시한다.
+- TTS를 쓰지 않으므로(2026-11-02 결정) narrating 단계는 없다. stage_total은 항상 3. 프론트는 단계 목록을 고정하지 않고 stage_index / stage_total을 그대로 표시한다.
 - label은 릴스 API가 내려주므로 문구 수정 시 프론트 배포가 필요 없다.
 
 오류 코드 (error.code)
@@ -258,7 +257,7 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
 | RENDER_FAILED | FFmpeg 실패(자동 재시도 1회 후) | failed, 다시 시도 |
 | TIMEOUT | 60초 초과 | failed, 다시 시도 |
 
-error에는 code와 함께 생활 한국어 안내 문구(message)를 넣는다. TTS가 실패하면 자막과 BGM만으로 계속 진행하며 fallbacks에 기록한다.
+error에는 code와 함께 생활 한국어 안내 문구(message)를 넣는다.
 
 ### 상태 전달 (콜백)
 
@@ -298,3 +297,4 @@ error에는 code와 함께 생활 한국어 안내 문구(message)를 넣는다.
 - 3.3절 "공통 장면 5개"는 메뉴 수에 따라 장면이 늘어나는 규칙으로 바뀐다.
 - 3.1·3.3절의 콘셉트 3종(시장형·숏폼형·브이로그형)은 심플·크리스마스 2종으로 바뀐다.
 - 두 콘셉트의 디자인(컷 속도, 전환, 자막, 색, BGM)은 팀에서 정한 뒤 템플릿 JSON에 반영한다.
+- TTS 내레이션을 전제로 한 절(있다면)은 삭제한다 — 2026-11-02부로 TTS를 쓰지 않기로 했다. 영상 소리는 BGM뿐이다.
