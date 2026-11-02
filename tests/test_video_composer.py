@@ -165,6 +165,19 @@ class TestBuildFfmpegCommand(unittest.TestCase):
         cmd = self._build()
         self.assertEqual(cmd[cmd.index("-r") + 1], "30")
 
+    def test_pixel_format_is_forced_to_yuv420p(self):
+        # Without this, libx264 just encodes whatever the subtitles filter's
+        # internal blending happens to output (seen in practice: yuv444p /
+        # "High 4:4:4 Predictive"), which most players — including phones
+        # and Instagram's own ingest — can't decode. yuv420p is the only
+        # broadly-compatible choice for a delivered reel.
+        cmd = self._build()
+        self.assertEqual(cmd[cmd.index("-pix_fmt") + 1], "yuv420p")
+
+    def test_faststart_flag_applied_for_streaming_playback(self):
+        cmd = self._build()
+        self.assertEqual(cmd[cmd.index("-movflags") + 1], "+faststart")
+
     def test_output_path_is_last_argument(self):
         cmd = self._build()
         self.assertEqual(cmd[-1], str(self.output))

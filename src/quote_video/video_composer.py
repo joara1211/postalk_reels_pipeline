@@ -289,9 +289,11 @@ def build_ffmpeg_command(
         "-map", "[vout]",
         "-map", "[aout]",
         "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
         "-preset", preset,
         "-r", str(fps),
         "-c:a", "aac",
+        "-movflags", "+faststart",
         "-t", f"{total_duration:.6f}",
         str(output_path),
     ]
