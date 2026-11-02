@@ -163,6 +163,37 @@ def _fit_duration_filter(label_in: str, label_out: str, src_duration: float, tar
     ]
 
 
+def _xfade_chain(
+    labels: list[str], durations: list[float], *, transition_type: str, transition_duration: float, output_label: str
+) -> list[str]:
+    """Chain clips `labels` (already-cropped scene streams, e.g. "v0") with
+    an ffmpeg `xfade` crossfade between each consecutive pair, instead of a
+    hard-cut `concat`. `durations` must be each clip's *actual* length as
+    produced by its own filter chain — the caller is responsible for having
+    stretched every clip but the last by `transition_duration` first (see
+    build_ffmpeg_command), so that after each pair's `transition_duration`
+    seconds of overlap, the combined result lands back on the original
+    (pre-stretch) total duration.
+
+    xfade only takes two inputs, so N clips chain pairwise: combine clip 0
+    and 1, then that result with clip 2, and so on. Each step's `offset`
+    (when the transition starts, in the already-combined stream's own
+    timeline) is simply "combined duration so far minus the overlap"."""
+    statements = []
+    combined_duration = durations[0]
+    prev_label = labels[0]
+    for i in range(1, len(labels)):
+        offset = combined_duration - transition_duration
+        out_label = output_label if i == len(labels) - 1 else f"{output_label}_x{i}"
+        statements.append(
+            f"[{prev_label}][{labels[i]}]xfade=transition={transition_type}:"
+            f"duration={transition_duration:.6f}:offset={offset:.6f}[{out_label}]"
+        )
+        combined_duration = combined_duration + durations[i] - transition_duration
+        prev_label = out_label
+    return statements
+
+
 def build_ffmpeg_command(
     scene_clips: list[SceneClip],
     subtitle_path: Path,
@@ -174,6 +205,8 @@ def build_ffmpeg_command(
     font_name: str,
     margin_v: int,
     bgm_gain_db: float | None = None,
+    transition_type: str = "fade",
+    transition_duration: float = 0.0,
     font_dir: Path = config.FONT_DIR,
     width: int = config.VIDEO_WIDTH,
     height: int = config.VIDEO_HEIGHT,
@@ -184,12 +217,21 @@ def build_ffmpeg_command(
     touch the filesystem or require ffmpeg to be installed.
 
     One input per scene clip plus one for BGM; every scene is fit to its
-    target duration, cropped to fill `width`x`height`, then concatenated —
-    a single encode instead of the old concat-then-compose two-pass
-    approach. `bgm_gain_db`, when given, is the actual dB gain applied to
-    the raw BGM track; if omitted, falls back to treating `bgm_volume` as a
-    flat linear multiplier of BGM's own raw level (appropriate until step 3
-    adds TTS to calibrate against — see compose_video()'s docstring)."""
+    target duration, cropped to fill `width`x`height`, then joined — a
+    single encode instead of the old concat-then-compose two-pass approach.
+    `bgm_gain_db`, when given, is the actual dB gain applied to the raw BGM
+    track; if omitted, falls back to treating `bgm_volume` as a flat linear
+    multiplier of BGM's own raw level (appropriate until step 3 adds TTS to
+    calibrate against — see compose_video()'s docstring).
+
+    `transition_duration > 0` joins scenes with an ffmpeg `xfade` crossfade
+    instead of a hard-cut `concat`. To keep the final output at the same
+    total duration as without transitions (every scene's `target_duration`
+    still sums to the planned 13/14/15s), every scene but the last is first
+    stretched/fit to `target_duration + transition_duration` — the extra
+    `transition_duration` at its tail is exactly what gets folded into the
+    next scene's crossfade, so the combined result lands back on the
+    original total (see _xfade_chain())."""
     if not scene_clips:
         raise ValueError("scene_clips must not be empty")
 
@@ -198,17 +240,29 @@ def build_ffmpeg_command(
     if bgm_gain_db is None:
         bgm_gain_db = 20 * math.log10(bgm_volume)
 
+    use_xfade = transition_duration > 0 and len(scene_clips) > 1
+    fit_durations = [c.target_duration for c in scene_clips]
+    if use_xfade:
+        fit_durations = [d + transition_duration for d in fit_durations[:-1]] + [fit_durations[-1]]
+
     filters: list[str] = []
     v_labels: list[str] = []
     for i, clip in enumerate(scene_clips):
-        filters += _fit_duration_filter(f"{i}:v", f"vfit{i}", clip.src_duration_sec, clip.target_duration)
+        filters += _fit_duration_filter(f"{i}:v", f"vfit{i}", clip.src_duration_sec, fit_durations[i])
         filters.append(
             f"[vfit{i}]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},fps={fps},setsar=1[v{i}]"
         )
-        v_labels.append(f"[v{i}]")
+        v_labels.append(f"v{i}")
 
-    filters.append("".join(v_labels) + f"concat=n={len(scene_clips)}:v=1:a=0[vconcat]")
+    if use_xfade:
+        filters += _xfade_chain(
+            v_labels, fit_durations,
+            transition_type=transition_type, transition_duration=transition_duration,
+            output_label="vconcat",
+        )
+    else:
+        filters.append("".join(f"[{l}]" for l in v_labels) + f"concat=n={len(scene_clips)}:v=1:a=0[vconcat]")
 
     subtitle_arg = _escape_filter_path(subtitle_path)
     fontsdir_arg = _escape_filter_path(font_dir)

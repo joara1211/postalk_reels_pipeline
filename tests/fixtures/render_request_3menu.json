@@ -1,0 +1,33 @@
+{
+  "user_id": 1,
+  "ad_id": "ad_test_0003",
+  "concept": "simple",
+  "store": { "name": "해오름 떡집", "description": "30년 전통 방식으로 만드는 동네 떡집" },
+  "menus": [
+    { "menu_index": 0, "name": "창억떡", "description": "쫀득한 식감" },
+    { "menu_index": 1, "name": "인절미", "description": "고소한 콩가루" },
+    { "menu_index": 2, "name": "백설기", "description": "담백한 맛" }
+  ],
+  "media": [
+    { "scene_index": 0, "menu_index": null, "key": "1.mp4" },
+    { "scene_index": 1, "menu_index": 0, "key": "2.mp4" },
+    { "scene_index": 2, "menu_index": 0, "key": "3.mp4" },
+    { "scene_index": 3, "menu_index": 1, "key": "4.mp4" },
+    { "scene_index": 4, "menu_index": 1, "key": "5.mp4" },
+    { "scene_index": 5, "menu_index": 2, "key": "6.mp4" },
+    { "scene_index": 6, "menu_index": 2, "key": "7.mp4" },
+    { "scene_index": 7, "menu_index": null, "key": "8.mp4" }
+  ],
+  "scenes": [
+    { "scene_index": 0, "text": "30년 전통 해오름 떡집" },
+    { "scene_index": 1, "text": "쫀득한 창억떡" },
+    { "scene_index": 2, "text": "입에 착 붙는 식감" },
+    { "scene_index": 3, "text": "고소한 인절미" },
+    { "scene_index": 4, "text": "콩가루 가득" },
+    { "scene_index": 5, "text": "담백한 백설기" },
+    { "scene_index": 6, "text": "부드러운 맛" },
+    { "scene_index": 7, "text": "오늘 바로 들러주세요" }
+  ],
+  "caption": "30년 전통 방식 그대로, 해오름 떡집의 다양한 떡을 만나보세요.",
+  "hashtags": ["#떡집", "#동네맛집"]
+}

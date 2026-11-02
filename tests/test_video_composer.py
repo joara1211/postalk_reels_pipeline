@@ -11,6 +11,7 @@ from src.quote_video.video_composer import (
     _fit_duration_filter,
     _remaining_seconds,
     _run,
+    _xfade_chain,
     build_ffmpeg_command,
     compose_video,
     compute_bgm_gain_db,
@@ -89,10 +90,32 @@ class TestBuildFfmpegCommand(unittest.TestCase):
         self.assertLess(i0, i1)
         self.assertLess(i1, i2)
 
-    def test_scenes_are_concatenated(self):
+    def test_scenes_are_concatenated_when_no_transition(self):
         cmd = self._build()
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
         self.assertIn("[v0][v1]concat=n=2:v=1:a=0[vconcat]", filter_complex)
+        self.assertNotIn("xfade", filter_complex)
+
+    def test_transition_duration_uses_xfade_instead_of_concat(self):
+        cmd = self._build(transition_type="fade", transition_duration=0.3)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertIn("xfade=transition=fade:duration=0.300000", filter_complex)
+        self.assertNotIn("concat=n=", filter_complex)
+
+    def test_transition_stretches_every_scene_but_the_last(self):
+        # scene 0 target=2.0 -> fit to 2.0+0.3=2.3; scene 1 (last) stays 4.5.
+        cmd = self._build(transition_type="fade", transition_duration=0.3)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        first_stmt = filter_complex.split(";")[0]
+        self.assertIn("duration=2.300000", first_stmt)
+
+    def test_transition_keeps_total_duration_and_fade_out_unchanged(self):
+        # total_duration (used for fade-out/-t) comes from nominal
+        # target_duration, not the per-clip xfade-inflated fit duration.
+        cmd = self._build(transition_type="fade", transition_duration=0.3)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertIn("fade=t=out:st=6.0:d=0.5", filter_complex)
+        self.assertEqual(cmd[cmd.index("-t") + 1], "6.500000")
 
     def test_no_scene_audio_is_mapped(self):
         cmd = self._build()
@@ -153,6 +176,27 @@ class TestBuildFfmpegCommand(unittest.TestCase):
     def test_preset_override(self):
         cmd = self._build(preset="ultrafast")
         self.assertEqual(cmd[cmd.index("-preset") + 1], "ultrafast")
+
+
+class TestXfadeChain(unittest.TestCase):
+    def test_two_clips_single_xfade_at_first_clips_duration_minus_overlap(self):
+        stmts = _xfade_chain(["v0", "v1"], [2.3, 4.5], transition_type="fade", transition_duration=0.3, output_label="vconcat")
+        self.assertEqual(len(stmts), 1)
+        self.assertIn("[v0][v1]xfade=transition=fade:duration=0.300000:offset=2.000000[vconcat]", stmts[0])
+
+    def test_three_clips_chain_through_intermediate_labels(self):
+        stmts = _xfade_chain(["v0", "v1", "v2"], [2.3, 4.8, 4.8], transition_type="fade", transition_duration=0.3, output_label="vconcat")
+        self.assertEqual(len(stmts), 2)
+        self.assertIn("[v0][v1]xfade=", stmts[0])
+        self.assertTrue(stmts[0].endswith("[vconcat_x1]"))
+        self.assertIn("[vconcat_x1][v2]xfade=", stmts[1])
+        self.assertTrue(stmts[1].endswith("[vconcat]"))
+        # second offset = (2.3 + 4.8 - 0.3) - 0.3
+        self.assertIn("offset=6.500000", stmts[1])
+
+    def test_transition_type_is_used(self):
+        stmts = _xfade_chain(["v0", "v1"], [2.0, 2.0], transition_type="wipeleft", transition_duration=0.3, output_label="vconcat")
+        self.assertIn("transition=wipeleft", stmts[0])
 
 
 class TestComposeVideo(unittest.TestCase):

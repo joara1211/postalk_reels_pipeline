@@ -57,6 +57,20 @@ class TestRunPipelineDeadline(unittest.TestCase):
         self.assertEqual(kwargs["font_name"], "Griun Fromsol")
         self.assertEqual(kwargs["margin_v"], 440)
 
+    def test_transition_settings_come_from_the_template(self):
+        run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertEqual(kwargs["transition_type"], "fade")
+        self.assertEqual(kwargs["transition_duration"], 0.3)
+
+    def test_christmas_concept_loads_its_own_template(self):
+        self.request.scenes  # sanity: request fixture is 'simple'
+        christmas_request = RenderRequest.from_json_file(FIXTURE)
+        christmas_request = RenderRequest(**{**christmas_request.__dict__, "concept": "christmas"})
+        run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertEqual(kwargs["transition_type"], "fade")
+
     def test_accepts_a_plain_dict_request_too(self):
         import json
 

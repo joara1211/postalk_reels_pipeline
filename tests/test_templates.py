@@ -21,6 +21,19 @@ class TestLoadTemplate(unittest.TestCase):
         self.assertIn("margin_v", render["subtitle"])
         self.assertIn("fade_sec", render)
 
+    def test_loads_christmas_json(self):
+        template = templates.load_template("christmas")
+        self.assertEqual(template["concept"], "christmas")
+        self.assertTrue(template["has_captions"])
+        self.assertIn("transition", template["render"])
+
+    def test_christmas_scene_rule_matches_simple(self):
+        # Scene structure (hook/closeup/detail/outro, durations) is shared
+        # across concepts per CLAUDE.md — only render/design values differ.
+        simple = templates.load_template("simple")
+        christmas = templates.load_template("christmas")
+        self.assertEqual(simple["scene_rule"], christmas["scene_rule"])
+
 
 class TestBuildScenePlan(unittest.TestCase):
     def setUp(self):

@@ -88,6 +88,7 @@ def run_pipeline(
     )
 
     bgm_path = config.REPO_ROOT / template["audio"]["bgm"]
+    transition_cfg = render_cfg["transition"]
 
     return compose_video(
         scene_specs,
@@ -98,6 +99,8 @@ def run_pipeline(
         fade_duration=render_cfg["fade_sec"],
         font_name=subtitle_cfg["font_name"],
         margin_v=subtitle_cfg["margin_v"],
+        transition_type=transition_cfg["type"],
+        transition_duration=transition_cfg["duration_sec"],
         font_dir=config.FONT_DIR,
         width=canvas["width"],
         height=canvas["height"],

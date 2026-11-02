@@ -55,7 +55,7 @@
     "canvas": { "width": 1080, "height": 1920, "fps": 30 },
     "fade_sec": 0.5,
     "ffmpeg_preset": "veryfast",
-    "transition": "fade",
+    "transition": { "type": "fade", "duration_sec": 0.3 },
     "subtitle": {
       "font_name": "Griun Fromsol",
       "font_file": "assets/font/Griun_Fromsol-Rg.ttf",
