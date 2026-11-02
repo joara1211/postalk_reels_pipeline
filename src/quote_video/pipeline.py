@@ -22,8 +22,8 @@ from . import config
 from .errors import NoUsableMediaError
 from .render_request import RenderRequest, build_render_plan
 from .subtitle_sync import CaptionLine, CaptionTiming, write_ass
-from .templates import load_template
-from .video_composer import compose_video
+from .templates import load_template, rebalance_menu_scene_durations
+from .video_composer import compose_video, probe_duration
 
 
 @dataclass(frozen=True)
@@ -70,6 +70,27 @@ def run_pipeline(
     template = load_template(request.concept, template_dir=template_dir)
     render_scenes = build_render_plan(request, template)
 
+    # Each menu's own time budget (closeup/detail/...) is split by how long
+    # the user actually recorded each scene, not always evenly — hook/outro
+    # stay fixed (see rebalance_menu_scene_durations()). Needs each
+    # per-menu scene's source clip length up front, which means probing
+    # here rather than leaving it to compose_video() as usual; that probe
+    # runs again inside compose_video() for the actual duration-fit
+    # filter, so this is a deliberate small duplicate cost (ffprobe is
+    # fast) traded for not having to thread pre-probed durations through
+    # video_composer's API.
+    fps = template["render"]["canvas"]["fps"]
+    probed_durations: dict[int, float] = {}
+    for rs in render_scenes:
+        if rs.scene.menu_index is not None:
+            media_path = media_root / rs.media_key
+            if media_path.exists():
+                probed_durations[rs.scene.scene_index] = probe_duration(media_path, deadline=deadline)
+    rebalanced_by_index = {
+        scene.scene_index: scene
+        for scene in rebalance_menu_scene_durations([rs.scene for rs in render_scenes], probed_durations, fps)
+    }
+
     scene_specs: list[tuple[Path, float]] = []
     timings: list[CaptionTiming] = []
     start = 0.0
@@ -77,7 +98,7 @@ def run_pipeline(
         media_path = media_root / rs.media_key
         if not media_path.exists():
             raise NoUsableMediaError(f"scene_index {rs.scene.scene_index}: no such file {media_path}")
-        duration = rs.scene.duration_sec
+        duration = rebalanced_by_index[rs.scene.scene_index].duration_sec
         scene_specs.append((media_path, duration))
         timings.append(
             CaptionTiming(

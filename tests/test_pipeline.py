@@ -46,9 +46,18 @@ class TestRunPipelineDeadline(unittest.TestCase):
     def test_scene_durations_match_the_one_menu_scene_plan(self):
         run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
         scene_specs = self.mock_compose.call_args.args[0]
-        durations = [d for _, d in scene_specs]
-        self.assertEqual(durations, [2.0, 4.5, 4.5, 2.0])
-        self.assertAlmostEqual(sum(durations), 13.0)
+        hook, closeup, detail, outro = (d for _, d in scene_specs)
+
+        self.assertEqual(hook, 2.0)
+        self.assertEqual(outro, 2.0)
+        # closeup/detail aren't forced to a flat 4.5/4.5 split anymore —
+        # they're weighted by each scene's actual recorded length
+        # (2.mp4/closeup is longer than 3.mp4/detail, see
+        # templates.rebalance_menu_scene_durations()), but the menu's own
+        # 9s budget is still preserved exactly.
+        self.assertAlmostEqual(closeup + detail, 9.0)
+        self.assertGreater(closeup, detail)
+        self.assertAlmostEqual(hook + closeup + detail + outro, 13.0)
 
     def test_bgm_and_subtitle_settings_come_from_the_template(self):
         run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
@@ -77,6 +86,39 @@ class TestRunPipelineDeadline(unittest.TestCase):
         data = json.loads(FIXTURE.read_text(encoding="utf-8"))
         run_pipeline(data, MEDIA_ROOT, Path("output/final.mp4"))
         self.mock_compose.assert_called_once()
+
+
+class TestRunPipelineDurationRebalancing(unittest.TestCase):
+    """Controls exact probed source durations (instead of relying on
+    assets/videos/*.mp4's real lengths) to check the rebalanced durations
+    precisely."""
+
+    def setUp(self):
+        patcher_compose = patch("src.quote_video.pipeline.compose_video")
+        self.mock_compose = patcher_compose.start()
+        self.addCleanup(patcher_compose.stop)
+        self.mock_compose.return_value = Path("output/final.mp4")
+
+        patcher_probe = patch("src.quote_video.pipeline.probe_duration")
+        self.mock_probe = patcher_probe.start()
+        self.addCleanup(patcher_probe.stop)
+        # closeup (2.mp4) filmed long, detail (3.mp4) filmed short.
+        self.mock_probe.side_effect = lambda path, **kwargs: {"2.mp4": 8.0, "3.mp4": 2.0}.get(path.name, 2.0)
+
+        self.request = RenderRequest.from_json_file(FIXTURE)
+
+    def test_closeup_gets_more_time_than_detail_from_longer_footage(self):
+        run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
+        scene_specs = self.mock_compose.call_args.args[0]
+        _hook, closeup, detail, _outro = (d for _, d in scene_specs)
+
+        self.assertGreater(closeup, 4.5)
+        self.assertLess(detail, 4.5)
+        self.assertAlmostEqual(closeup + detail, 9.0)
+
+    def test_probing_uses_the_shared_deadline(self):
+        run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
+        self.assertIn("deadline", self.mock_probe.call_args.kwargs)
 
 
 class TestRunPipelineMediaValidation(unittest.TestCase):
