@@ -1,6 +1,9 @@
-"""Composes the final MP4 with ffmpeg: burns in captions, mixes BGM under
-the original on-site audio, and applies fade in/out. No image or TTS
-generation happens here — `video_path` is already-edited real footage.
+"""Composes the final MP4 in a single ffmpeg pass: each scene's source clip
+is fit to its target duration (middle-trim if long enough, slow-down if
+short, slow-down + repeat for very short clips), cropped to fill the 9:16
+canvas, concatenated, burned with ASS captions, faded in/out, and mixed
+with BGM. Per-scene audio is never used — on-site sound is removed
+entirely (CLAUDE.md: "촬영 원본 소리는 모두 제거한다").
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ import math
 import re
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
@@ -97,29 +101,80 @@ def probe_mean_volume_db(audio_path: Path, *, deadline: float | None = None) -> 
 
 
 def compute_bgm_gain_db(orig_mean_db: float, bgm_mean_db: float, bgm_volume: float) -> float:
-    """Gain (dB) to apply to the raw BGM track so its measured loudness sits
-    at `bgm_volume` (linear ratio, e.g. 0.2 = 20%) relative to the on-site
-    audio's measured loudness — not relative to the BGM file's own raw
-    level, which is what a flat `volume=bgm_volume` would do and can leave
-    BGM effectively inaudible under louder on-site audio."""
+    """Gain (dB) to apply to a raw audio track so its measured loudness sits
+    at `bgm_volume` (linear ratio, e.g. 0.2 = 20%) relative to another
+    track's measured loudness (`orig_mean_db`) — not relative to its own
+    raw level, which is what a flat `volume=bgm_volume` would do and can
+    leave it effectively inaudible under a louder reference track.
+
+    Kept for step 3 (TTS), when BGM gets calibrated relative to the
+    narration track the same way the old pipeline calibrated it relative
+    to on-site audio. Not used by compose_video() yet — see its docstring."""
     target_db = orig_mean_db + 20 * math.log10(bgm_volume)
     return target_db - bgm_mean_db
 
 
+@dataclass(frozen=True)
+class SceneClip:
+    media_path: Path
+    target_duration: float  # seconds, from the scene plan
+    src_duration_sec: float  # seconds, probed from the actual media file
+
+
+def _fit_duration_filter(label_in: str, label_out: str, src_duration: float, target_duration: float) -> list[str]:
+    """Build the filtergraph statement(s) that turn a clip of `src_duration`
+    seconds into exactly `target_duration` seconds, labelled `label_out`
+    (video only — scene audio is never used, see module docstring):
+
+    - source is long enough: trim the middle (avoids shaky starts/ends).
+    - source is a bit short (>= half the target): slow down just enough
+      (speed in (1, 2]) to stretch it to the target.
+    - source is very short (< half the target): slow down 0.5x, then
+      repeat it whole until it covers the target, then trim the excess.
+      (CLAUDE.md "바꿀 것": "0.5배속 슬로우 → 반복 → (최후) 정지 프레임" — the
+      final freeze-frame fallback isn't needed here since repeating an
+      already-looping clip always reaches the target exactly.)
+    """
+    eps = 1e-6
+    if src_duration >= target_duration - eps:
+        start = max((src_duration - target_duration) / 2, 0.0)
+        return [
+            f"[{label_in}]trim=start={start:.6f}:duration={target_duration:.6f},"
+            f"setpts=PTS-STARTPTS[{label_out}]"
+        ]
+
+    half_target = target_duration / 2
+    if src_duration >= half_target - eps:
+        speed = target_duration / src_duration  # in (1, 2]
+        return [
+            f"[{label_in}]setpts={speed:.6f}*PTS,trim=duration={target_duration:.6f},"
+            f"setpts=PTS-STARTPTS[{label_out}]"
+        ]
+
+    slow_duration = src_duration * 2
+    reps = math.ceil(target_duration / slow_duration)
+    slowed = f"{label_out}_slow"
+    split_labels = [f"{label_out}_r{i}" for i in range(reps)]
+    return [
+        f"[{label_in}]setpts=2.0*PTS[{slowed}]",
+        f"[{slowed}]split={reps}" + "".join(f"[{l}]" for l in split_labels),
+        "".join(f"[{l}]" for l in split_labels) + f"concat=n={reps}:v=1:a=0[{label_out}_cat]",
+        f"[{label_out}_cat]trim=duration={target_duration:.6f},setpts=PTS-STARTPTS[{label_out}]",
+    ]
+
+
 def build_ffmpeg_command(
-    video_path: Path,
+    scene_clips: list[SceneClip],
     subtitle_path: Path,
     bgm_path: Path,
     output_path: Path,
-    duration: float,
     *,
-    bgm_volume: float = config.BGM_VOLUME,
+    bgm_volume: float,
+    fade_duration: float,
+    font_name: str,
+    margin_v: int,
     bgm_gain_db: float | None = None,
-    orig_volume: float = config.ORIGINAL_VOLUME,
-    fade_duration: float = config.FADE_DURATION,
     font_dir: Path = config.FONT_DIR,
-    font_name: str = config.SUBTITLE_FONT_NAME,
-    margin_v: int = config.SUBTITLE_MARGIN_V,
     width: int = config.VIDEO_WIDTH,
     height: int = config.VIDEO_HEIGHT,
     fps: int = config.FPS,
@@ -128,90 +183,53 @@ def build_ffmpeg_command(
     """Build the ffmpeg argv for the compose step. Pure/testable: does not
     touch the filesystem or require ffmpeg to be installed.
 
-    `bgm_gain_db`, when given (normally computed by compose_video() via
-    compute_bgm_gain_db()), is the actual dB gain applied to the raw BGM
-    track. If omitted, falls back to treating `bgm_volume` as a flat linear
-    multiplier of the BGM's own raw level (the old, naive behaviour)."""
-    fade_out_start = max(duration - fade_duration, 0.0)
-    subtitle_arg = _escape_filter_path(subtitle_path)
-    fontsdir_arg = _escape_filter_path(font_dir)
+    One input per scene clip plus one for BGM; every scene is fit to its
+    target duration, cropped to fill `width`x`height`, then concatenated —
+    a single encode instead of the old concat-then-compose two-pass
+    approach. `bgm_gain_db`, when given, is the actual dB gain applied to
+    the raw BGM track; if omitted, falls back to treating `bgm_volume` as a
+    flat linear multiplier of BGM's own raw level (appropriate until step 3
+    adds TTS to calibrate against — see compose_video()'s docstring)."""
+    if not scene_clips:
+        raise ValueError("scene_clips must not be empty")
+
+    total_duration = sum(c.target_duration for c in scene_clips)
+    fade_out_start = max(total_duration - fade_duration, 0.0)
     if bgm_gain_db is None:
         bgm_gain_db = 20 * math.log10(bgm_volume)
 
-    filter_complex = (
-        f"[0:a]volume={orig_volume}[a_orig];"
-        f"[1:a]volume={bgm_gain_db}dB,aloop=loop=-1:size=2147483647[a_bgm];"
-        f"[a_orig][a_bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a_mixed];"
-        f"[a_mixed]alimiter=limit=0.97[aout];"
-        f"[0:v]subtitles='{subtitle_arg}':fontsdir='{fontsdir_arg}':"
+    filters: list[str] = []
+    v_labels: list[str] = []
+    for i, clip in enumerate(scene_clips):
+        filters += _fit_duration_filter(f"{i}:v", f"vfit{i}", clip.src_duration_sec, clip.target_duration)
+        filters.append(
+            f"[vfit{i}]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},fps={fps},setsar=1[v{i}]"
+        )
+        v_labels.append(f"[v{i}]")
+
+    filters.append("".join(v_labels) + f"concat=n={len(scene_clips)}:v=1:a=0[vconcat]")
+
+    subtitle_arg = _escape_filter_path(subtitle_path)
+    fontsdir_arg = _escape_filter_path(font_dir)
+    filters.append(
+        f"[vconcat]subtitles='{subtitle_arg}':fontsdir='{fontsdir_arg}':"
         f"force_style='FontName={font_name},MarginV={margin_v}',"
         f"fade=t=in:st=0:d={fade_duration},"
         f"fade=t=out:st={fade_out_start}:d={fade_duration}[vout]"
     )
 
-    return [
-        "ffmpeg", "-y",
-        "-i", str(video_path),
-        "-i", str(bgm_path),
-        "-filter_complex", filter_complex,
-        "-map", "[vout]",
-        "-map", "[aout]",
-        "-c:v", "libx264",
-        "-preset", preset,
-        "-r", str(fps),
-        "-s", f"{width}x{height}",
-        "-c:a", "aac",
-        "-shortest",
-        str(output_path),
-    ]
-
-
-def build_concat_command(
-    clip_paths: list[Path],
-    clip_durations: list[float],
-    output_path: Path,
-    *,
-    cut_duration: float = config.CUT_DURATION,
-    width: int = config.VIDEO_WIDTH,
-    height: int = config.VIDEO_HEIGHT,
-    fps: int = config.FPS,
-    preset: str = config.FFMPEG_PRESET,
-) -> list[str]:
-    """Build the ffmpeg argv that normalizes raw per-cut clips (varying
-    resolution/duration, e.g. assets/videos/1.mp4, 2.mp4, ...) and
-    concatenates them into one source video: each clip is trimmed/padded to
-    exactly `cut_duration` and letterboxed to a common resolution. Pure/
-    testable: does not touch the filesystem or require ffmpeg installed."""
-    if len(clip_paths) != len(clip_durations):
-        raise ValueError("clip_paths and clip_durations must be the same length")
-    if not clip_paths:
-        raise ValueError("clip_paths must not be empty")
-
-    filters = []
-    concat_refs = []
-    for i, duration in enumerate(clip_durations):
-        trim_dur = min(duration, cut_duration)
-        pad_dur = max(0.0, cut_duration - duration)
-        video_chain = (
-            f"[{i}:v]trim=start=0:duration={trim_dur},setpts=PTS-STARTPTS,"
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps={fps}"
-        )
-        if pad_dur > 0:
-            video_chain += f",tpad=stop_mode=clone:stop_duration={pad_dur}"
-        video_chain += f"[v{i}]"
-        filters.append(video_chain)
-        filters.append(
-            f"[{i}:a]atrim=start=0:duration={trim_dur},asetpts=PTS-STARTPTS,"
-            f"apad=whole_dur={cut_duration}[a{i}]"
-        )
-        concat_refs.append(f"[v{i}][a{i}]")
-
-    filters.append(f"{''.join(concat_refs)}concat=n={len(clip_paths)}:v=1:a=1[vout][aout]")
+    bgm_input_index = len(scene_clips)
+    filters.append(
+        f"[{bgm_input_index}:a]volume={bgm_gain_db}dB,aloop=loop=-1:size=2147483647,"
+        f"atrim=duration={total_duration:.6f},asetpts=PTS-STARTPTS,"
+        f"afade=t=out:st={fade_out_start}:d={fade_duration}[aout]"
+    )
 
     command = ["ffmpeg", "-y"]
-    for clip in clip_paths:
-        command += ["-i", str(clip)]
+    for clip in scene_clips:
+        command += ["-i", str(clip.media_path)]
+    command += ["-i", str(bgm_path)]
     command += [
         "-filter_complex", ";".join(filters),
         "-map", "[vout]",
@@ -220,74 +238,56 @@ def build_concat_command(
         "-preset", preset,
         "-r", str(fps),
         "-c:a", "aac",
+        "-t", f"{total_duration:.6f}",
         str(output_path),
     ]
     return command
 
 
-def assemble_cuts_video(
-    clip_paths: list[Path],
-    output_path: Path,
-    *,
-    cut_duration: float = config.CUT_DURATION,
-    deadline: float | None = None,
-    **kwargs,
-) -> Path:
-    """Normalize and concatenate raw per-cut clips into a single
-    already-edited source video, ready to hand to compose_video().
-
-    `deadline` (a time.monotonic() timestamp) is an optional wall-clock
-    budget shared across every ffprobe/ffmpeg call in this function — pass
-    it down from run_pipeline() rather than a fresh duration per call, so
-    time already spent on earlier clips counts against later ones."""
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    durations = [probe_duration(clip, deadline=deadline) for clip in clip_paths]
-    command = build_concat_command(clip_paths, durations, output_path, cut_duration=cut_duration, **kwargs)
-    _run(command, deadline=deadline, check=True)
-    return output_path
-
-
 def compose_video(
-    video_path: Path,
+    scene_specs: list[tuple[Path, float]],
     subtitle_path: Path,
     bgm_path: Path,
     output_path: Path,
     *,
-    duration: float | None = None,
-    bgm_volume: float = config.BGM_VOLUME,
-    orig_volume: float = config.ORIGINAL_VOLUME,
+    bgm_volume: float,
+    fade_duration: float,
+    font_name: str,
+    margin_v: int,
     deadline: float | None = None,
     **kwargs,
 ) -> Path:
+    """Probe each scene's source clip, then build and run the ffmpeg
+    command. `scene_specs` is `(media_path, target_duration_sec)` per
+    scene, in final order.
+
+    BGM is calibrated against its own raw level (a flat ratio of
+    `bgm_volume`), not relative to another track — there's no narration or
+    on-site audio in this step's output to be relative *to* yet. Step 3
+    (TTS) will switch this to calibrate BGM relative to the TTS track's
+    measured loudness, the way the old pipeline calibrated it relative to
+    on-site audio (see compute_bgm_gain_db())."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if duration is None:
-        duration = probe_duration(video_path, deadline=deadline)
 
-    if orig_volume > 0:
-        # BGM is calibrated against the on-site audio's level *after* its
-        # own volume reduction, so the two stay balanced regardless of
-        # orig_volume.
-        orig_mean_db = probe_mean_volume_db(video_path, deadline=deadline) + 20 * math.log10(orig_volume)
-        bgm_mean_db = probe_mean_volume_db(bgm_path, deadline=deadline)
-        bgm_gain_db = compute_bgm_gain_db(orig_mean_db, bgm_mean_db, bgm_volume)
-    else:
-        # On-site audio is muted entirely — there's nothing left to be
-        # "relative to" (and `math.log10(0)` would raise anyway). BGM
-        # becomes the sole audio track, so build_ffmpeg_command()'s
-        # fallback (bgm_gain_db=None -> flat 20*log10(bgm_volume) of BGM's
-        # own raw level) is the sensible interpretation here.
-        bgm_gain_db = None
+    scene_clips = [
+        SceneClip(
+            media_path=media_path,
+            target_duration=target_duration,
+            src_duration_sec=probe_duration(media_path, deadline=deadline),
+        )
+        for media_path, target_duration in scene_specs
+    ]
 
     command = build_ffmpeg_command(
-        video_path,
+        scene_clips,
         subtitle_path,
         bgm_path,
         output_path,
-        duration,
-        bgm_gain_db=bgm_gain_db,
-        orig_volume=orig_volume,
+        bgm_volume=bgm_volume,
+        fade_duration=fade_duration,
+        font_name=font_name,
+        margin_v=margin_v,
         **kwargs,
     )
     _run(command, deadline=deadline, check=True)

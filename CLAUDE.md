@@ -2,120 +2,130 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository state
+## 이 레포가 무엇이 되는가
 
-This repo (`youtube_longform_agent`) contains the actual application code, built from the plan in `quote-video-prompt/`. `quote-video-prompt/` is **its own separate git repository** (remote: `github.com/uxjoseph/quote-video-prompt`), not a submodule — it shows up as untracked in the outer repo's git status. Do not try to commit inside it as part of the outer repo's history, and do not assume `git log`/`git diff` at the top level will show its history.
+이 레포의 기존 코드(`src/quote_video/`, 실제 영상 + 손으로 쓴 자막 대본 → ASS 자막 → FFmpeg 합성)를
+**POSTALK 릴스 파이프라인**으로 개조한다. POSTALK는 2026 CO-SHOW 전시용 서비스로, 사용자가 음식·가게를
+장면별로 촬영하면 AI가 인스타그램용 광고(카드뉴스·릴스)를 만들어 POSTALK 공식 인스타그램에 게시한다.
 
-**`quote-video-prompt/prompt.md` and `README.md` describe an earlier plan that no longer matches what's built here** — the user explicitly dropped the image-generation and TTS/STT stages (2026-08-20) in favor of using real footage directly. Treat those two files as historical/superseded context, not as the current spec. The real spec is this file plus the code itself.
+- 이 레포 담당: **릴스 파이프라인(아라)**. 입력을 받아 MP4·썸네일·캡션을 내놓기까지가 범위다.
+- 범위 밖: 화면(준서, React PWA), Next.js API·Supabase·S3 발급·인스타 게시(성준), 카드뉴스 이미지 AI(지우).
+- 실행 위치: AWS EC2의 Docker 기반 **FastAPI + FFmpeg** 서비스. Next.js 백엔드가 작업을 등록하고,
+  미디어 서버는 상태·결과를 콜백으로 돌려준다. 프론트는 이 서버를 직접 호출하지 않는다.
 
-## Actual pipeline (as built, superseding the original prompt.md plan)
+**API 계약의 원본은 `docs/reels-api-spec.md`다.** 엔드포인트, 필드 이름, 상태 값, 오류 코드는 그 문서를 따른다.
+명세와 다르게 구현해야 할 이유가 생기면 코드를 먼저 바꾸지 말고 사용자에게 먼저 묻는다(프론트·백엔드가 이 명세에 맞춰 개발 중이다).
+
+이전 CLAUDE.md는 `docs/legacy-CLAUDE.md`에 보관했다. 아래 "기존 코드에서 반드시 지킬 것"에 핵심을 옮겨 두었다.
+
+## 목표 파이프라인
 
 ```
-real footage (already cut-edited, on-site audio kept) + hand-written per-cut caption script
-        → generate-subtitle (rule-based timestamps, no STT, markdown stripped) → .ass
-        → compose-video (ffmpeg: burn .ass, mix in BGM, fade in/out) → final MP4
+[대본] POST /reels/scripts  (정보 입력 직후, 촬영 중 백그라운드)
+   가게·메뉴 정보 → LLM(JSON 구조화 출력) → 장면별 자막 + 캡션·해시태그
+[생성] POST /reels/renders  (자막 확정 + 재료 업로드 후)
+   S3 영상 다운로드 → 정규화(1080x1920, 30fps, 9:16 중앙 크롭, 원본 오디오 제거)
+   → 장면 길이 맞춤 → TTS 생성 → ASS 자막 → 장면 합성 + 전환(xfade) + BGM(덕킹) + TTS
+   → MP4(H.264/AAC) + 썸네일 → S3 업로드 → 콜백
 ```
 
-There is **no image generation and no TTS/STT** in this system — `video_path` is always real, already-edited footage; Gemini image gen, Gemini TTS, and Whisper were all cut from the original plan. Do not reintroduce them without asking the user first.
+### 확정된 결정 (사용자와 합의됨, 임의로 바꾸지 말 것)
 
-### The caption/cut timing rule
+- **생성형 영상 AI는 쓰지 않는다.** 템플릿 + FFmpeg만.
+- **장면 구성은 메뉴 수에 따라 달라진다.** `hook`(가게, 촬영) → 메뉴마다 `closeup`·`detail`(촬영) → `outro`(가게, 갤러리 영상).
+  메뉴 1/2/3개 → 장면 4/6/8개, 전체 13/14/15초. hook·outro는 2초, 메뉴 블록은 9/10/11초를 메뉴 장면 수로 나눈다.
+- **콘셉트 2종**: `simple`(심플), `christmas`(크리스마스). 릴스·카드뉴스 공통.
+  **두 콘셉트의 디자인(컷 속도, 전환, 자막 스타일, 색, 폰트, BGM 곡)은 아직 미정이다.** 템플릿 JSON 값으로만 표현하고
+  코드에 콘셉트별 분기를 하드코딩하지 않는다. 디자인이 정해지기 전까지는 임시 값(기본 페이드, 흰 글씨+반투명 박스, 임의 BGM)으로 둔다.
+  두 콘셉트 모두 **자막 사용(has_captions=true), TTS 사용**. `has_captions` 필드는 프론트 분기용으로 남겨 두되 false인 콘셉트는 현재 없다.
+- **BGM은 쓴다.** 콘셉트별 기본곡 1곡, 사용자 선택 기능 없음. TTS가 나오는 동안 BGM 자동 덕킹.
+- **촬영 원본 소리는 모두 제거**한다(기존 코드의 "현장음 유지" 규칙은 폐기).
+- **자막 텍스트 = TTS 내레이션 텍스트.** 장면당 자막 1개, 장면별 최대 글자 수 제한.
+- **가격 입력란은 없다.** 메뉴 설명에서 LLM이 가격을 뽑아 detail 장면에 넣고, 없으면 생략.
+- **사진 움직임 효과(켄 번즈)는 기본 기능에서 제외.** 입력은 영상이다.
+- **자막은 우선 전부 ASS로 만든다**(BorderStyle=3으로 박스형 가능). Pillow PNG 자막은 둥근 박스·스티커가 꼭 필요해질 때만 추가.
+- 템플릿은 코드와 분리된 **JSON 파일**(`templates/<concept>.json`). 콘셉트 추가·수정 시 코드를 바꾸지 않는다.
+- 렌더 목표 **30초 이내**, 하드 타임아웃 **60초**(초과 시 `TIMEOUT`으로 실패 처리).
+- 사용자는 고정 계정 `user_id = 1`. 가게 이름은 Next.js가 회원 정보에서 채워 보낸다.
 
-This is the load-bearing design decision (confirmed with the user, not guessed):
-- Source video cuts are a fixed `CUT_DURATION` = 2.0s each.
-- Each caption line in the script is shown for a fixed `CAPTION_DURATION` = 1.0s.
-- So every video cut carries exactly `CAPTIONS_PER_CUT` = 2 caption lines in sequence.
-- Timestamps are computed purely from line order (line *i* → `[i·1s, (i+1)·1s)`) — no speech recognition, no manual per-line timestamp entry. `subtitle_sync.total_video_duration()` raises if the caption count doesn't divide evenly by 2, since that means it can't line up with real 2s cuts.
+### 실패 대체 (한 단계가 실패해도 가능하면 완성)
 
-All three constants live in `src/quote_video/config.py` — change them there, not inline, if the rule ever changes.
+- LLM 실패: 1회 재시도 → 템플릿 기본 문구 + 가게명·메뉴명으로 채우고 `is_fallback: true`
+- 장면 영상 없음/읽기 실패: 같은 메뉴의 다른 장면 → 다른 장면 영상의 다른 구간으로 대체, `fallbacks`에 기록
+- TTS 실패: 자막 + BGM만으로 진행, `fallbacks`에 기록
+- FFmpeg 실패: 1회 자동 재시도 → `RENDER_FAILED`
+- 쓸 수 있는 영상이 하나도 없음: `NO_USABLE_MEDIA`
 
-### Caption script format — two accepted forms, live asset uses the current (bracketed-timestamp) one
+## 기존 코드에서 반드시 지킬 것 (시행착오로 얻은 것)
 
-Parsed by `subtitle_sync.parse_caption_script()` via `_CAPTION_LINE_RE`. Only the number immediately before the final `:**` on each line is read (as the caption's 1-based `sequence_number`) — everything else in that `**...**` span (a `[bracketed timestamp]`, a `자막`/`컷` label) is decorative and ignored. Numbers must be sequential from 1 across the whole file; `## [...]` section headers are for human readability only and aren't matched.
+- **자막은 `.srt`가 아니라 `.ass`, 헤더에 `PlayResX`/`PlayResY`를 영상 크기로 지정.** SRT를 libass로 태우면
+  기본 해상도(384x288) 기준으로 MarginV 등이 ~6.67배 틀어진다. 위치를 다시 검증할 땐 실제 영상 말고 단색 테스트 클립으로 픽셀 위치를 확인한다.
+- **폰트 `.woff`/`.woff2`는 `fontTools`로 `.ttf` 변환** 후 사용(libass가 woff를 못 읽음).
+  ```python
+  from fontTools.ttLib import TTFont
+  f = TTFont("assets/font/Name.woff"); f.flavor = None; f.save("assets/font/Name.ttf")
+  ```
+- **BGM 음량은 기준 트랙의 실측 음량 대비로 보정**: `probe_mean_volume_db()`(volumedetect) + `compute_bgm_gain_db()`,
+  `amix ... normalize=0` + `alimiter`. 기준 트랙이 현장음 → **TTS**로 바뀐다.
+- `-preset veryfast` 유지(8클립/16초 기준 4~5초 측정).
+- 파이프라인 전체에 **하나의 공유 데드라인**을 넘겨 모든 ffprobe/ffmpeg 호출에 남은 시간을 적용(`PipelineTimeoutError`). 값만 config에서 60초로.
+- `subprocess.run(..., text=True)`에는 `encoding="utf-8", errors="replace"`(Windows cp949 콘솔 대응).
+- 설정값은 `config.py`(→ 앞으로는 템플릿 JSON)에 모으고 인라인 하드코딩 금지.
 
-```markdown
-# older format (still supported, tests/fixtures/sample_caption.md)
-## [제1문장]
-* **1컷:** text
-* **2컷:** text
+## 기존 코드에서 바꿀 것
 
-# current format — what's actually in assets/caption/*.md as of 2026-08-20
-## [비디오 컷 1] (00:00 ~ 00:02)
-* **[00:00 ~ 00:01] 자막 1:** text
-* **[00:01 ~ 00:02] 자막 2:** text
-```
+| 지금 | 바꿀 방향 |
+|---|---|
+| `CUT_DURATION`=2초, `CAPTION_DURATION`=1초, 컷당 자막 2줄 고정 | 템플릿 JSON 기반 장면별 길이, 장면당 자막 1개, 메뉴 수에 따른 장면 수 |
+| 해상도 다르면 레터박스 | 9:16 중앙 크롭으로 꽉 채우기 |
+| 짧은 클립은 `tpad` 정지 프레임 | 0.5배속 슬로우 → 반복 → (최후) 정지 프레임 |
+| 긴 클립은 앞부분 사용 | 앞뒤 흔들림 피해 중간 구간 사용 |
+| 마크다운 대본 파서 입력 | API JSON 장면 목록 입력(파서는 테스트용으로만 유지) |
+| 현장음 0.7 + BGM 20% | 원본 오디오 제거, BGM + TTS, TTS 구간 BGM 덕킹(sidechaincompress) |
+| 클립 concat 후 합성(2회 인코딩) | xfade 전환을 위해 하나의 filter_complex로 합성 |
+| CLI 전용 | FastAPI 서비스(작업·상태·진행 단계·콜백). CLI는 로컬 테스트용 유지 |
+| 타임아웃 20초 | 하드 60초, 목표 30초 |
 
-**The written-in `[00:00 ~ 00:01]` timestamps are not parsed or used for anything** — actual timing still comes purely from `compute_timings()`'s `sequence_number × CAPTION_DURATION` rule. They happen to already match that rule in the current file; if someone edits them to diverge (e.g. hand-tunes one line's window), the rule still wins silently. If real per-line time control becomes a requirement, that needs a deliberate design change (parse and honor the bracket), not an assumption — ask first.
+## 새로 만들 것
 
-`tests/fixtures/sample_caption.md` (older format) and `tests/fixtures/sample_caption_timestamped.md` (current format, copied from `assets/caption/자막.md`) are both real 16-line examples used by the test suite. `sample_caption.md`'s cut 4 has inline `**bold**` markup inside the caption text itself (not just around the label), used to test markdown stripping.
+- LLM 대본 생성(`/reels/scripts`): 장면별 자막, 캡션(≤2,200자), 해시태그(≤30개), 가격 추출
+- TTS 생성 및 장면 길이와 맞추기
+- 콘셉트별 전환(xfade)·자막 스타일 (2종, 디자인 미정이므로 JSON 값으로 교체 가능하게)
+- 썸네일(hook 장면에서 1080x1920 JPG)
+- 진행 단계 보고: `preparing → narrating → composing → uploading` (TTS 없으면 narrating 생략), 한국어 label 포함
+- S3 다운로드/업로드, Next.js 콜백 전송
+- 오류 코드: `CAPTION_TOO_LONG`, `SCENE_MISMATCH`, `ALREADY_RENDERING`, `NO_USABLE_MEDIA`, `RENDER_FAILED`, `TIMEOUT`
 
-Caption text can carry inline markdown emphasis (e.g. `상호명 **명품대게**를 꼭 방문해 보세요!`) that isn't meant to reach the rendered subtitle. `subtitle_sync._strip_markdown()` strips `**bold**`, `__bold__`, `` `code` ``, `*italic*`, and any leftover stray `*`/`_`/`` ` `` from every parsed line before it becomes a `CaptionLine`.
+## 작업 순서
 
-## Layout
+1. **(지금) 로컬 최소 파이프라인**: 메뉴 1개짜리 테스트 영상 4개(hook, closeup, detail, outro) + 직접 쓴 자막 JSON
+   → `templates/simple.json` 기반 13초 MP4. 순서: 템플릿 JSON 스키마 → 9:16 크롭 정규화 → 장면 길이 맞춤 → ASS 자막 → BGM.
+   길이가 제각각(2초/5초/15초)인 영상과 가로 영상으로 테스트한다.
+2. 메뉴 2·3개 장면 규칙, 전환 효과, 콘셉트 2종(`christmas.json` 추가)
+3. TTS + 덕킹
+4. LLM 대본 생성
+5. FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체
+6. S3 연동, Docker, 속도 측정(목표 30초)
 
-- `src/quote_video/` — `config.py` (all tunables), `subtitle_sync.py` (parse script → `.ass`), `video_composer.py` (ffmpeg compose + raw-clip concat), `pipeline.py` (orchestrates the two + CLI entry point). No `image_generator.py` / `tts_generator.py` — intentionally absent.
-- `.claude/skills/{generate-subtitle,compose-video}/SKILL.md` — one skill per pipeline stage.
-- `.claude/agents/quote-video-agent.md` (orchestrator) and `quote-writer-agent.md` (writes new caption scripts into `assets/caption/`).
-- `.claude/commands/create-quote-video.md` — the `/createvideo` command.
-- `assets/font/`, `assets/bgm/`, `assets/videos/`, `assets/caption/` now hold real assets (see below); `output/` (gitignored) is where rendered MP4s and the `_build/` intermediates (SRT, assembled source video) land.
+각 단계마다 unittest를 추가한다. 기존 테스트 중 폐기된 규칙(2초 컷, 컷당 자막 2줄, 현장음)에 묶인 것은 지우지 말고 새 규칙에 맞게 고치거나, 지워야 하면 사용자에게 먼저 알린다.
 
-### `assets/videos/` is raw numbered per-cut clips, not one pre-edited file
+## 아직 팀과 확정 안 된 것 (가정으로 구현하되, 바꾸기 쉽게)
 
-Real footage arrived as `1.mp4`, `2.mp4`, ... `8.mp4` — one clip per cut, each a **different resolution and an arbitrary duration** (not a clean 2.0s). `pipeline._resolve_video_path()` handles this: if `video_path` is a directory, it globs `*.mp4`, sorts numerically by filename, and calls `video_composer.assemble_cuts_video()` to normalize each clip (scale+letterbox to a common canvas, trim if longer than `CUT_DURATION`, freeze-frame-pad via `tpad` if shorter) and concatenate them into one source video before handing off to `compose_video()`. Pass a directory as `--video` to use this path; pass a single file to skip it.
+- 작업 등록 방식: Next.js → 미디어 서버 직접 호출 vs SQS
+- 콜백 경로·서버 간 인증 방식 (가정: `POST {NEXT_BASE_URL}/api/internal/reels/callback`, 헤더 API 키)
+- S3 키 규칙·버킷 이름 (가정: `uploads/{user_id}/{ad_id}/{scene_index}.mp4`, `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg`)
+- 메뉴당 2장면 규칙에 대한 프론트 최종 동의
+- LLM·TTS 제공자 (환경변수로 교체 가능하게)
+- 심플·크리스마스 콘셉트의 디자인 전체
 
-### Subtitle font is WOFF, not TTF — needs conversion
-
-`assets/font/JayeonSans-Medium.woff` is the only font supplied (the plan's `KOTRA_SONGEULSSI` was never provided). libass/fontconfig can't load `.woff` directly, so it was converted once with `fontTools` into `assets/font/JayeonSans-Medium.ttf` (family name inside the font is `Jayeon Sans Medium`, wired up in `config.SUBTITLE_FONT_NAME`/`SUBTITLE_FONT_FILE`). If new fonts show up as `.woff`/`.woff2`, convert the same way:
-
-```python
-from fontTools.ttLib import TTFont
-f = TTFont("assets/font/Name.woff"); f.flavor = None; f.save("assets/font/Name.ttf")
-```
-
-### Subtitles are burned in from .ass, not .srt — libass mis-scales SRT margins
-
-Burning in a plain `.srt` via ffmpeg's `subtitles` filter (`force_style='...MarginV=220'`) does *not* place captions 220px from the bottom of a 1080x1920 canvas — libass silently assumes the legacy default script resolution (384x288) for a bare SRT and scales `MarginV` (and any other numeric style values) against *that*, not the real frame size. On this canvas that's a ~6.67x inflation, which pushed a `MarginV=220` caption almost to the *top* of the frame instead of clearing the bottom UI (confirmed empirically by rendering solid-color test frames at several MarginV values). Confirmed via the same reproduction that a real `.ass` file with an explicit `PlayResX`/`PlayResY` header sidesteps this entirely — margins land at the intended pixel scale.
-
-Fix: `subtitle_sync.build_ass()`/`generate_ass()` emit a minimal `.ass` script with `PlayResX`/`PlayResY` set to `config.VIDEO_WIDTH`/`VIDEO_HEIGHT` and the style (`FontName`, `MarginV`) baked in; `pipeline.py` generates `<name>.ass` (not `.srt`) and `video_composer.build_ffmpeg_command()`'s `subtitle_path` param points at it (still re-applies `FontName`/`MarginV` via `force_style` too — redundant with the baked-in style but harmless, and lets compose-time overrides work without regenerating the caption file). `build_srt()`/`generate_srt()` are still in `subtitle_sync.py` and tested, but nothing in the pipeline calls them anymore — don't reintroduce `.srt` into the compose step without re-testing this exact positioning bug.
-
-If you need to re-verify subtitle positioning after touching this code, don't trust visual inspection of the real footage alone (its own baked-in letterboxing can make the vertical position ambiguous) — render a solid-color test clip and check pixel position directly, the way this was diagnosed.
-
-### BGM volume is calibrated relative to the on-site audio, not to its own raw level
-
-The first render had BGM technically mixed in but inaudible — `volume=0.2` was applied to the BGM's own raw amplitude, and the on-site market audio happened to be ~14dB louder than that, plus `amix`'s default `normalize=1` halved both tracks again on top. Fixed in `video_composer.py`: `compose_video()` now measures both tracks' mean loudness with `probe_mean_volume_db()` (parses ffmpeg's `volumedetect` output) and `compute_bgm_gain_db()` derives the actual dB gain needed so BGM's *measured loudness* sits at `BGM_VOLUME` (0.20 = 20%) relative to the *on-site audio's measured loudness* — not 20% of BGM's own level. `amix` now runs with `normalize=0` (so this calibration isn't silently undone) and an `alimiter` guards against clipping from the sum. If BGM still seems too quiet/loud after this, adjust `config.BGM_VOLUME`, not the filter internals.
-
-`subprocess.run(..., text=True)` calls in `video_composer.py` pass `encoding="utf-8", errors="replace"` explicitly — without it, ffmpeg's stderr (UTF-8) fails to decode under Windows' default cp949 console locale and crashes the probe.
-
-### `run_pipeline()` has a 20s wall-clock budget, enforced as a hard timeout — not a performance promise
-
-2026-08-20 feedback: "어떤 1~8.mp4와 대본.md가 와도 ... 20초 이내로 끝나도록." There is no way to *guarantee* arbitrary input finishes in a fixed time (encode cost scales with total output duration — more/longer cuts is more work, period), so this was built as two separate things instead of one impossible one:
-
-1. **Speed**: `config.FFMPEG_PRESET = "veryfast"` (was implicitly libx264's own "medium" default) is now passed via `-preset` to both `build_ffmpeg_command()` and `build_concat_command()`. For the actual 8-clip/16s case this runs in ~4-5s wall-clock end to end (measured), comfortably under budget.
-2. **A hard ceiling**: `config.PIPELINE_TIMEOUT_SECONDS = 20.0`. `pipeline.run_pipeline()` computes one `deadline = time.monotonic() + timeout_seconds` and threads it through every ffprobe/ffmpeg call in both `assemble_cuts_video()` and `compose_video()` (`video_composer._run()` wraps `subprocess.run(..., timeout=...)`). Time already spent on clip 3's probe counts against clip 4's — it's one shared budget across the whole pipeline call, not a fresh N seconds per subprocess. Exceeding it raises `video_composer.PipelineTimeoutError` (a `TimeoutError` subclass) instead of hanging or silently running long. Pass `timeout_seconds=None` (or CLI `--timeout 0`) to disable.
-
-If a real input still blows the 20s budget (e.g. someone hands it a 5-minute source instead of ~16s of cuts), that's the intended failure mode — a fast, clear `PipelineTimeoutError`, not a slow success. Don't try to make the deadline itself adaptive to input size; that would defeat the point of a promised ceiling.
-
-## Commands
+## 명령어
 
 ```bash
-python -m unittest discover -s tests -v   # run tests (stdlib unittest, no pytest installed)
+python -m unittest discover -s tests -v   # 테스트 (stdlib unittest)
 
-# single pre-edited source video:
-python -m src.quote_video.pipeline --video <file.mp4> --caption <path.md> [--bgm <path>] --output <path.mp4>
-
-# directory of raw numbered per-cut clips (1.mp4, 2.mp4, ...) — auto-assembled first:
+# 기존 CLI (개조 전까지 유지)
 python -m src.quote_video.pipeline --video assets/videos --caption assets/caption/<name>.md --bgm "assets/bgm/<name>.mp3" --output output/<name>.mp4
-
-# --timeout overrides the default 20s wall-clock budget (see below); 0 disables it
-python -m src.quote_video.pipeline --video assets/videos --caption assets/caption/<name>.md --output output/<name>.mp4 --timeout 30
 ```
 
-ffmpeg was not preinstalled in this dev environment; it was installed via `winget install --id Gyan.FFmpeg` into `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0-full_build\bin`. A shell opened before that install needs that dir prepended to `PATH` manually (or just open a new shell — winget already updated the persistent user `PATH`).
-
-## Fixed config values (current, in `config.py`)
-
-- Video: **1080x1920 portrait** (30fps, 0.5s fade in/out) — changed from the original plan's 1920x1080 landscape because every real source clip in `assets/videos/` is portrait (this is reels/shorts content). Revisit only if the user says otherwise.
-- Subtitle font: `Jayeon Sans Medium` (`assets/font/JayeonSans-Medium.ttf`, converted from the supplied `.woff` — see above).
-- Subtitle bottom margin: `SUBTITLE_MARGIN_V` = 220px (in the `.ass` canvas' own pixel scale — see above), raised from libass's small default so captions clear Instagram Reels' bottom UI (2026-08-20 feedback).
-- On-site audio volume: `ORIGINAL_VOLUME` = 0.7 (linear), turned down from the raw recording so BGM has room (2026-08-20 feedback — "기존 영상 소리 좀 더 낮춰줘"). `compose_video()` factors this into the BGM gain calibration below, so the two stay balanced whatever `ORIGINAL_VOLUME` is set to.
-- BGM volume: 20% (`BGM_VOLUME`), mixed under the (now-reduced) original on-site audio via `amix`, not replacing it.
-- Image style (`Notion-style minimal illustration`) and TTS voice values from the original plan are now moot — no image-gen or TTS stage exists to consume them.
+개발 환경은 Windows(winget으로 설치한 FFmpeg), 배포는 Linux Docker다. 경로는 `pathlib`로 다루고 OS 의존 코드를 넣지 않는다.
+API 키(LLM, TTS, AWS)는 `.env`로만 받고 커밋하지 않는다.

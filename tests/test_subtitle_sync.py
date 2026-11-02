@@ -1,14 +1,12 @@
 import unittest
 from pathlib import Path
 
-from src.quote_video import config
 from src.quote_video.subtitle_sync import (
     _strip_markdown,
     build_ass,
     build_srt,
     compute_timings,
     parse_caption_script,
-    total_video_duration,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_caption.md"
@@ -77,25 +75,6 @@ class TestComputeTimings(unittest.TestCase):
         self.assertEqual(timings[-1].start, 15.0)
         self.assertEqual(timings[-1].end, 16.0)
 
-    def test_two_lines_per_cut_share_the_same_two_second_cut_window(self):
-        lines = parse_caption_script(FIXTURE)
-        timings = compute_timings(lines, caption_duration=config.CAPTION_DURATION)
-
-        # cut 1 (video [0s, 2s)) should hold caption lines 1 and 2.
-        first_cut_lines = [t for t in timings if t.start < config.CUT_DURATION]
-        self.assertEqual(len(first_cut_lines), config.CAPTIONS_PER_CUT)
-
-
-class TestTotalVideoDuration(unittest.TestCase):
-    def test_16_lines_implies_16_second_video(self):
-        lines = parse_caption_script(FIXTURE)
-        self.assertEqual(total_video_duration(lines), 16.0)
-
-    def test_odd_number_of_lines_raises(self):
-        lines = parse_caption_script(FIXTURE)[:-1]  # drop to 15, odd
-        with self.assertRaises(ValueError):
-            total_video_duration(lines)
-
 
 class TestBuildSrt(unittest.TestCase):
     def test_srt_format_and_timestamps(self):
@@ -143,6 +122,29 @@ class TestBuildAss(unittest.TestCase):
         ass = build_ass([timing])
         self.assertNotIn("{tag}", ass)
         self.assertIn("(tag)", ass)
+
+    def test_box_style_params_from_template_land_in_the_style_line(self):
+        # templates/<concept>.json's render.subtitle block drives these —
+        # BorderStyle=3 + an opaque-ish BackColour draws a solid box
+        # instead of a text outline (CLAUDE.md: "BorderStyle=3으로 박스형 가능").
+        from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
+
+        timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="box"), start=0.0, end=1.0)
+        ass = build_ass(
+            [timing],
+            font_size=48,
+            primary_color="&H00112233",
+            back_color="&H60445566",
+            border_style=3,
+            outline=0,
+        )
+        style_line = next(line for line in ass.splitlines() if line.startswith("Style: Default,"))
+        fields = style_line.split(",")
+        self.assertEqual(fields[2], "48")  # Fontsize
+        self.assertEqual(fields[3], "&H00112233")  # PrimaryColour
+        self.assertEqual(fields[6], "&H60445566")  # BackColour
+        self.assertEqual(fields[15], "3")  # BorderStyle
+        self.assertEqual(fields[16], "0")  # Outline
 
 
 if __name__ == "__main__":

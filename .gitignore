@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 _build/
 output/
+
+# API 키 (LLM, TTS, AWS)
+.env
+.env.*
+!.env.example

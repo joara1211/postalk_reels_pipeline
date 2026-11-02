@@ -1,0 +1,23 @@
+{
+  "user_id": 1,
+  "ad_id": "ad_test_0001",
+  "concept": "simple",
+  "store": { "name": "해오름 떡집", "description": "30년 전통 방식으로 만드는 동네 떡집" },
+  "menus": [
+    { "menu_index": 0, "name": "창억떡", "description": "쫀득한 식감, 한 팩 5,000원" }
+  ],
+  "media": [
+    { "scene_index": 0, "menu_index": null, "key": "1.mp4" },
+    { "scene_index": 1, "menu_index": 0, "key": "2.mp4" },
+    { "scene_index": 2, "menu_index": 0, "key": "3.mp4" },
+    { "scene_index": 3, "menu_index": null, "key": "4.mp4" }
+  ],
+  "scenes": [
+    { "scene_index": 0, "text": "30년 전통 해오름 떡집" },
+    { "scene_index": 1, "text": "쫀득한 창억떡" },
+    { "scene_index": 2, "text": "입에 착 붙는 쫀득함" },
+    { "scene_index": 3, "text": "오늘 바로 들러주세요" }
+  ],
+  "caption": "30년 전통 방식 그대로, 해오름 떡집 창억떡을 만나보세요.",
+  "hashtags": ["#창억떡", "#떡집", "#동네맛집"]
+}

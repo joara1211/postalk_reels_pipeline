@@ -1,83 +1,116 @@
-"""Orchestrates the quote-video pipeline end to end:
+"""Orchestrates the reels pipeline end to end:
 
-    caption script -> .ass (subtitle_sync) -> composed MP4 (video_composer)
+    POST /reels/renders body -> scene plan (templates) -> validated render
+    plan (render_request) -> .ass captions (subtitle_sync) -> composed MP4
+    (video_composer)
 
-There is no image-generation or TTS stage; `video_path` must already be
-real footage edited to fixed-length cuts (see config.CUT_DURATION).
+No image-generation stage exists; every scene's media must already be real
+footage (see docs/reels-api-spec.md section 2 for the scene rule and
+section 4 for the request body this takes).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from pathlib import Path
 
 from . import config
-from .subtitle_sync import generate_ass, parse_caption_script, total_video_duration
-from .video_composer import assemble_cuts_video, compose_video
-
-
-def _resolve_video_path(video_path: Path, build_dir: Path, *, deadline: float | None = None) -> Path:
-    """If `video_path` is a directory of raw per-cut clips (e.g. assets/videos/
-    with 1.mp4, 2.mp4, ...), normalize and concatenate them into one source
-    video first. If it's already a single file, use it as-is."""
-    if video_path.is_dir():
-        clips = sorted(video_path.glob("*.mp4"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
-        if not clips:
-            raise ValueError(f"No .mp4 clips found in {video_path}")
-        return assemble_cuts_video(clips, build_dir / "assembled_source.mp4", deadline=deadline)
-    return video_path
+from .errors import NoUsableMediaError
+from .render_request import RenderRequest, build_render_plan
+from .subtitle_sync import CaptionLine, CaptionTiming, write_ass
+from .templates import load_template
+from .video_composer import compose_video
 
 
 def run_pipeline(
-    video_path: Path,
-    caption_script_path: Path,
-    bgm_path: Path,
+    request: RenderRequest | dict,
+    media_root: Path,
     output_path: Path,
     *,
+    template_dir: Path = config.TEMPLATE_DIR,
     build_dir: Path | None = None,
     timeout_seconds: float | None = config.PIPELINE_TIMEOUT_SECONDS,
 ) -> Path:
-    """Run the full pipeline: preprocess/concat `video_path` if it's a
-    directory of raw cuts, turn the caption script into a time-ordered
-    .ass, then compose the final MP4.
+    """Run the full pipeline for one render request.
 
-    `timeout_seconds` is a wall-clock budget for the whole call (clip
-    preprocessing + compose combined) — pass None to disable. It's an
-    upper bound enforced via subprocess timeouts, not a performance
-    guarantee: a much longer/heavier input will still fail (with
-    `PipelineTimeoutError`) rather than magically finishing in time, since
-    encode cost scales with total output duration."""
-    video_path = Path(video_path)
-    caption_script_path = Path(caption_script_path)
-    bgm_path = Path(bgm_path)
+    `timeout_seconds` is a wall-clock budget for the whole call, enforced
+    via subprocess timeouts (`PipelineTimeoutError`) — pass None to
+    disable. Per docs/reels-api-spec.md: hard ceiling 60s, target 30s; the
+    60s is what's actually enforced here, 30s is a goal to hit well inside
+    it, not a second timeout."""
+    if isinstance(request, dict):
+        request = RenderRequest.from_dict(request)
+    media_root = Path(media_root)
     output_path = Path(output_path)
     build_dir = Path(build_dir) if build_dir else output_path.parent / "_build"
     deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
 
-    lines = parse_caption_script(caption_script_path)
-    expected_duration = total_video_duration(lines)
+    template = load_template(request.concept, template_dir=template_dir)
+    render_scenes = build_render_plan(request, template)
 
-    resolved_video_path = _resolve_video_path(video_path, build_dir, deadline=deadline)
+    scene_specs: list[tuple[Path, float]] = []
+    timings: list[CaptionTiming] = []
+    start = 0.0
+    for rs in render_scenes:
+        media_path = media_root / rs.media_key
+        if not media_path.exists():
+            raise NoUsableMediaError(f"scene_index {rs.scene.scene_index}: no such file {media_path}")
+        duration = rs.scene.duration_sec
+        scene_specs.append((media_path, duration))
+        timings.append(
+            CaptionTiming(
+                line=CaptionLine(sequence_number=rs.scene.scene_index, text=rs.text),
+                start=start,
+                end=start + duration,
+            )
+        )
+        start += duration
+
+    render_cfg = template["render"]
+    canvas = render_cfg["canvas"]
+    subtitle_cfg = render_cfg["subtitle"]
 
     subtitle_path = build_dir / f"{output_path.stem}.ass"
-    generate_ass(caption_script_path, subtitle_path)  # pure-Python parsing, negligible — no deadline needed
+    write_ass(
+        timings,
+        subtitle_path,
+        width=canvas["width"],
+        height=canvas["height"],
+        font_name=subtitle_cfg["font_name"],
+        font_size=subtitle_cfg["font_size"],
+        primary_color=subtitle_cfg["primary_color"],
+        back_color=subtitle_cfg["back_color"],
+        border_style=subtitle_cfg["border_style"],
+        outline=subtitle_cfg["outline"],
+        margin_v=subtitle_cfg["margin_v"],
+    )
+
+    bgm_path = config.REPO_ROOT / template["audio"]["bgm"]
 
     return compose_video(
-        video_path=resolved_video_path,
+        scene_specs,
         subtitle_path=subtitle_path,
         bgm_path=bgm_path,
         output_path=output_path,
-        duration=expected_duration,
+        bgm_volume=template["audio"]["bgm_volume"],
+        fade_duration=render_cfg["fade_sec"],
+        font_name=subtitle_cfg["font_name"],
+        margin_v=subtitle_cfg["margin_v"],
+        font_dir=config.FONT_DIR,
+        width=canvas["width"],
+        height=canvas["height"],
+        fps=canvas["fps"],
+        preset=render_cfg.get("ffmpeg_preset", config.FFMPEG_PRESET),
         deadline=deadline,
     )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the quote-video pipeline.")
-    parser.add_argument("--video", type=Path, required=True, help="Source footage (already cut-edited).")
-    parser.add_argument("--caption", type=Path, required=True, help="Per-cut caption script (markdown).")
-    parser.add_argument("--bgm", type=Path, default=None, help="BGM file (default: config.BGM_DIR/default.mp3).")
+    parser = argparse.ArgumentParser(description="Run the reels pipeline for one render request.")
+    parser.add_argument("--request", type=Path, required=True, help="POST /reels/renders JSON body.")
+    parser.add_argument("--media-root", type=Path, required=True, help="Base dir media[].key is resolved against.")
     parser.add_argument("--output", type=Path, required=True, help="Output MP4 path.")
     parser.add_argument(
         "--timeout", type=float, default=config.PIPELINE_TIMEOUT_SECONDS,
@@ -85,9 +118,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    bgm_path = args.bgm or (config.BGM_DIR / "default.mp3")
+    request = RenderRequest.from_dict(json.loads(args.request.read_text(encoding="utf-8")))
     output_path = run_pipeline(
-        args.video, args.caption, bgm_path, args.output,
+        request, args.media_root, args.output,
         timeout_seconds=args.timeout or None,
     )
     print(f"Wrote {output_path}")

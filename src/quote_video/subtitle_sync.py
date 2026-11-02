@@ -1,9 +1,16 @@
-"""Turns a hand-written per-cut caption script into a timed SRT file.
+"""Builds the timed .ass subtitle file burned into the final MP4.
 
-No speech recognition involved: timestamps are derived purely from line
-order using the fixed rule in `config` (CAPTION_DURATION per line) —
-*not* from any timestamps that happen to be written in the script itself
-(see `_CAPTION_LINE_RE` below). Two script formats are accepted:
+The real pipeline (pipeline.py) builds `CaptionTiming`s directly from the
+API-driven scene plan (templates.build_scene_plan() + the request's
+per-scene text) and calls `write_ass()` — no speech recognition, no parsing
+of a script file.
+
+`parse_caption_script()`/`compute_timings()`/`build_srt()`/`generate_ass()`
+below are the *old* quote-video pipeline's hand-written-markdown-script
+parser (one caption line = a fixed `caption_duration` seconds, timestamps
+purely from line order). They're kept only for their existing tests and
+are not called by the real pipeline anymore. Two script formats are
+accepted:
 
     ## [제1문장]                                  (older format)
     * **1컷:** some text
@@ -15,9 +22,7 @@ order using the fixed rule in `config` (CAPTION_DURATION per line) —
 
 In both, only the number immediately before the final `:**` is read (as
 the caption's 1-based sequence number); any `[bracketed timestamp]` or
-`자막`/`컷` label text around it is decorative and ignored — if it
-disagrees with the CAPTION_DURATION-per-line rule, the rule wins, since
-that's what actually drives the burned-in .ass timing.
+`자막`/`컷` label text around it is decorative and ignored.
 """
 
 from __future__ import annotations
@@ -88,25 +93,18 @@ def parse_caption_script(path: Path) -> list[CaptionLine]:
     return lines
 
 
-def compute_timings(
-    lines: list[CaptionLine], caption_duration: float = config.CAPTION_DURATION
-) -> list[CaptionTiming]:
-    """Assign each caption line a [start, end) window, in file order."""
+def compute_timings(lines: list[CaptionLine], caption_duration: float = 1.0) -> list[CaptionTiming]:
+    """Assign each caption line a fixed-length [start, end) window, in file
+    order. This is the old markdown-script timing rule (one caption line =
+    `caption_duration` seconds) — kept only for the legacy fixture-based
+    tests (see module docstring); the real pipeline derives per-scene
+    windows from the scene plan instead (see pipeline.py), since each
+    scene's duration now varies with menu count rather than being a fixed
+    2s cut."""
     return [
         CaptionTiming(line=line, start=i * caption_duration, end=(i + 1) * caption_duration)
         for i, line in enumerate(lines)
     ]
-
-
-def total_video_duration(lines: list[CaptionLine]) -> float:
-    """Expected source-video length implied by the caption/cut timing rule."""
-    if len(lines) % config.CAPTIONS_PER_CUT != 0:
-        raise ValueError(
-            f"{len(lines)} caption lines does not divide evenly into "
-            f"{config.CAPTIONS_PER_CUT} lines/cut"
-        )
-    num_cuts = len(lines) // config.CAPTIONS_PER_CUT
-    return num_cuts * config.CUT_DURATION
 
 
 def _format_ass_timestamp(seconds: float) -> str:
@@ -128,8 +126,13 @@ def build_ass(
     *,
     width: int = config.VIDEO_WIDTH,
     height: int = config.VIDEO_HEIGHT,
-    font_name: str = config.SUBTITLE_FONT_NAME,
-    margin_v: int = config.SUBTITLE_MARGIN_V,
+    font_name: str = "Griun Fromsol",
+    font_size: int = 64,
+    primary_color: str = "&H00FFFFFF",
+    back_color: str = "&H80000000",
+    border_style: int = 1,
+    outline: int = 2,
+    margin_v: int = 440,
 ) -> str:
     """Render timed captions as a minimal .ass script with an explicit
     PlayResX/PlayResY matching the real output canvas.
@@ -141,7 +144,16 @@ def build_ass(
     220 to ~1467px, pushing captions almost to the top of the frame. An
     .ass file with a correct PlayResX/PlayResY header sidesteps the
     guesswork entirely, so positions/margins apply at the intended pixel
-    scale."""
+    scale.
+
+    All style params default to the pre-templates look (outline-only text,
+    no box) purely so legacy/test callers don't need to pass them — the
+    real pipeline always passes these explicitly from
+    templates/<concept>.json's "render.subtitle" block (design isn't
+    finalized yet, so it must stay editable there, not hardcoded here).
+    `border_style=3` + a non-transparent `back_color` draws a solid caption
+    box instead of an outline, per CLAUDE.md's "자막은 우선 전부 ASS로
+    만든다(BorderStyle=3으로 박스형 가능)"."""
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -153,8 +165,8 @@ def build_ass(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font_name},64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
-        f"0,0,0,0,100,100,0,0,1,2,0,2,40,40,{margin_v},1\n"
+        f"Style: Default,{font_name},{font_size},{primary_color},&H000000FF,&H00000000,{back_color},"
+        f"0,0,0,0,100,100,0,0,{border_style},{outline},0,2,40,40,{margin_v},1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -171,11 +183,18 @@ def generate_ass(
     caption_script_path: Path,
     output_ass_path: Path,
     *,
-    caption_duration: float = config.CAPTION_DURATION,
+    caption_duration: float = 1.0,
     **kwargs,
 ) -> Path:
+    """Legacy markdown-script path (see module docstring) — the real
+    pipeline builds CaptionTiming directly from the scene plan instead
+    (see pipeline.py) and calls write_ass()."""
     lines = parse_caption_script(caption_script_path)
     timings = compute_timings(lines, caption_duration=caption_duration)
+    return write_ass(timings, output_ass_path, **kwargs)
+
+
+def write_ass(timings: list[CaptionTiming], output_ass_path: Path, **kwargs) -> Path:
     ass_content = build_ass(timings, **kwargs)
     output_ass_path = Path(output_ass_path)
     output_ass_path.parent.mkdir(parents=True, exist_ok=True)

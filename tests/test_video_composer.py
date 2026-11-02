@@ -5,198 +5,194 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.quote_video import config
 from src.quote_video.video_composer import (
     PipelineTimeoutError,
+    SceneClip,
+    _fit_duration_filter,
     _remaining_seconds,
     _run,
-    build_concat_command,
     build_ffmpeg_command,
     compose_video,
     compute_bgm_gain_db,
 )
 
 
+class TestFitDurationFilter(unittest.TestCase):
+    """The per-scene duration-fit rule (CLAUDE.md "바꿀 것"): trim the middle
+    if the clip is long enough, slow down just enough if it's a bit short,
+    slow 0.5x + repeat if it's very short."""
+
+    def test_long_clip_trims_the_middle_not_the_start(self):
+        stmts = _fit_duration_filter("0:v", "v0", src_duration=5.0, target_duration=2.0)
+        combined = ";".join(stmts)
+        self.assertIn("trim=start=1.500000:duration=2.000000", combined)
+        self.assertNotIn("setpts=2", combined)
+
+    def test_exact_length_clip_is_not_sped_up_or_slowed(self):
+        stmts = _fit_duration_filter("0:v", "v0", src_duration=2.0, target_duration=2.0)
+        combined = ";".join(stmts)
+        self.assertIn("trim=start=0.000000:duration=2.000000", combined)
+
+    def test_moderately_short_clip_is_slowed_by_the_minimum_needed(self):
+        # 3s clip stretched to 4.5s -> speed factor 1.5 (within the 1x-2x
+        # band, so no looping needed).
+        stmts = _fit_duration_filter("0:v", "v0", src_duration=3.0, target_duration=4.5)
+        combined = ";".join(stmts)
+        self.assertIn("setpts=1.500000*PTS", combined)
+        self.assertIn("trim=duration=4.500000", combined)
+        self.assertNotIn("split", combined)
+
+    def test_very_short_clip_is_slowed_half_speed_then_repeated(self):
+        # 1s clip, 0.5x slow -> 2s; needs to cover 4.5s -> repeated 3x then
+        # trimmed down to 4.5s.
+        stmts = _fit_duration_filter("0:v", "v0", src_duration=1.0, target_duration=4.5)
+        combined = ";".join(stmts)
+        self.assertIn("setpts=2.0*PTS", combined)
+        self.assertIn("split=3", combined)
+        self.assertIn("concat=n=3:v=1:a=0", combined)
+        self.assertIn("trim=duration=4.500000", combined)
+
+    def test_output_label_is_used(self):
+        stmts = _fit_duration_filter("2:v", "scene9", src_duration=5.0, target_duration=2.0)
+        self.assertTrue(stmts[-1].endswith("[scene9]"))
+
+
 class TestBuildFfmpegCommand(unittest.TestCase):
     def setUp(self):
-        self.video = Path("video.mp4")
+        self.scene_clips = [
+            SceneClip(media_path=Path("hook.mp4"), target_duration=2.0, src_duration_sec=3.3),
+            SceneClip(media_path=Path("closeup.mp4"), target_duration=4.5, src_duration_sec=4.0),
+        ]
         self.subtitle = Path("out.ass")
         self.bgm = Path("bgm.mp3")
         self.output = Path("final.mp4")
 
-    def test_maps_video_and_bgm_inputs_in_order(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
-        self.assertEqual(cmd[0], "ffmpeg")
-        i0 = cmd.index(str(self.video))
-        i1 = cmd.index(str(self.bgm))
+    def _build(self, **overrides):
+        kwargs = dict(
+            bgm_volume=0.3,
+            fade_duration=0.5,
+            font_name="Griun Fromsol",
+            margin_v=440,
+        )
+        kwargs.update(overrides)
+        return build_ffmpeg_command(self.scene_clips, self.subtitle, self.bgm, self.output, **kwargs)
+
+    def test_rejects_empty_scene_list(self):
+        with self.assertRaises(ValueError):
+            build_ffmpeg_command([], self.subtitle, self.bgm, self.output, bgm_volume=0.3, fade_duration=0.5, font_name="F", margin_v=1)
+
+    def test_one_input_per_scene_plus_bgm_in_order(self):
+        cmd = self._build()
+        i0 = cmd.index(str(self.scene_clips[0].media_path))
+        i1 = cmd.index(str(self.scene_clips[1].media_path))
+        i2 = cmd.index(str(self.bgm))
         self.assertLess(i0, i1)
+        self.assertLess(i1, i2)
+
+    def test_scenes_are_concatenated(self):
+        cmd = self._build()
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertIn("[v0][v1]concat=n=2:v=1:a=0[vconcat]", filter_complex)
+
+    def test_no_scene_audio_is_mapped(self):
+        cmd = self._build()
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertNotIn("[0:a]", filter_complex)
+        self.assertNotIn("[1:a]", filter_complex)
+
+    def test_crop_fills_the_canvas(self):
+        cmd = self._build()
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertIn("scale=1080:1920:force_original_aspect_ratio=increase", filter_complex)
+        self.assertIn("crop=1080:1920", filter_complex)
 
     def test_explicit_bgm_gain_db_is_used_verbatim(self):
-        cmd = build_ffmpeg_command(
-            self.video, self.subtitle, self.bgm, self.output, duration=16.0, bgm_gain_db=-7.5
-        )
+        cmd = self._build(bgm_gain_db=-7.5)
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
         self.assertIn("volume=-7.5dB", filter_complex)
 
     def test_bgm_gain_falls_back_to_flat_ratio_of_bgm_volume(self):
-        cmd = build_ffmpeg_command(
-            self.video, self.subtitle, self.bgm, self.output, duration=16.0, bgm_volume=0.20
-        )
+        cmd = self._build(bgm_volume=0.20)
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
         expected_db = 20 * math.log10(0.20)
         self.assertIn(f"volume={expected_db}dB", filter_complex)
 
-    def test_amix_normalize_disabled_and_limiter_applied(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
+    def test_bgm_loops_and_is_trimmed_to_total_scene_duration(self):
+        cmd = self._build()
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("normalize=0", filter_complex)
-        self.assertIn("alimiter", filter_complex)
+        self.assertIn("aloop=loop=-1:size=2147483647", filter_complex)
+        self.assertIn("atrim=duration=6.500000", filter_complex)  # 2.0 + 4.5
 
-    def test_original_audio_volume_is_applied(self):
-        cmd = build_ffmpeg_command(
-            self.video, self.subtitle, self.bgm, self.output, duration=16.0, orig_volume=0.7
-        )
+    def test_subtitle_margin_v_and_font_applied(self):
+        cmd = self._build(font_name="Jayeon Sans Medium", margin_v=220)
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        a_orig_segment = filter_complex.split(";")[0]
-        self.assertEqual(a_orig_segment, "[0:a]volume=0.7[a_orig]")
+        self.assertIn("FontName=Jayeon Sans Medium,MarginV=220", filter_complex)
 
-    def test_default_original_volume_matches_config(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn(f"volume={config.ORIGINAL_VOLUME}[a_orig]", filter_complex)
-
-    def test_subtitle_margin_v_applied(self):
-        cmd = build_ffmpeg_command(
-            self.video, self.subtitle, self.bgm, self.output, duration=16.0, margin_v=220
-        )
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("MarginV=220", filter_complex)
-
-    def test_default_margin_v_matches_config(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn(f"MarginV={config.SUBTITLE_MARGIN_V}", filter_complex)
-
-    def test_fade_out_starts_duration_minus_fade(self):
-        cmd = build_ffmpeg_command(
-            self.video, self.subtitle, self.bgm, self.output, duration=16.0, fade_duration=0.5
-        )
+    def test_fade_out_starts_total_duration_minus_fade(self):
+        cmd = self._build(fade_duration=0.5)
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
         self.assertIn("fade=t=in:st=0:d=0.5", filter_complex)
-        self.assertIn("fade=t=out:st=15.5:d=0.5", filter_complex)
+        self.assertIn("fade=t=out:st=6.0:d=0.5", filter_complex)  # 6.5 - 0.5
 
-    def test_output_resolution_and_fps(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
-        self.assertIn(f"{config.VIDEO_WIDTH}x{config.VIDEO_HEIGHT}", cmd)
-        self.assertIn(str(config.FPS), cmd)
+    def test_fps_default_applied(self):
+        # output resolution comes from the per-scene crop (see
+        # test_crop_fills_the_canvas), so there's no separate "-s" flag to check.
+        cmd = self._build()
+        self.assertEqual(cmd[cmd.index("-r") + 1], "30")
 
     def test_output_path_is_last_argument(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
+        cmd = self._build()
         self.assertEqual(cmd[-1], str(self.output))
 
     def test_preset_applied_and_defaults_to_config(self):
-        cmd = build_ffmpeg_command(self.video, self.subtitle, self.bgm, self.output, duration=16.0)
-        self.assertIn("-preset", cmd)
+        from src.quote_video import config
+
+        cmd = self._build()
         self.assertEqual(cmd[cmd.index("-preset") + 1], config.FFMPEG_PRESET)
 
     def test_preset_override(self):
-        cmd = build_ffmpeg_command(
-            self.video, self.subtitle, self.bgm, self.output, duration=16.0, preset="ultrafast"
-        )
+        cmd = self._build(preset="ultrafast")
         self.assertEqual(cmd[cmd.index("-preset") + 1], "ultrafast")
 
 
-class TestBuildConcatCommand(unittest.TestCase):
+class TestComposeVideo(unittest.TestCase):
     def setUp(self):
-        self.clips = [Path("1.mp4"), Path("2.mp4"), Path("3.mp4")]
-        self.output = Path("assembled.mp4")
-
-    def test_rejects_mismatched_lengths(self):
-        with self.assertRaises(ValueError):
-            build_concat_command(self.clips, [2.0, 2.0], self.output)
-
-    def test_rejects_empty_clip_list(self):
-        with self.assertRaises(ValueError):
-            build_concat_command([], [], self.output)
-
-    def test_longer_clip_is_trimmed_not_padded(self):
-        cmd = build_concat_command(self.clips, [3.0, 2.0, 2.0], self.output, cut_duration=2.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("trim=start=0:duration=2.0", filter_complex)
-        self.assertNotIn("tpad", filter_complex.split(";")[0])
-
-    def test_shorter_clip_is_padded_with_tpad(self):
-        cmd = build_concat_command(self.clips, [1.2, 2.0, 2.0], self.output, cut_duration=2.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("tpad=stop_mode=clone:stop_duration=0.8", filter_complex)
-
-    def test_concat_filter_references_every_clip(self):
-        cmd = build_concat_command(self.clips, [2.0, 2.0, 2.0], self.output, cut_duration=2.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("concat=n=3:v=1:a=1[vout][aout]", filter_complex)
-        for clip in self.clips:
-            self.assertIn(str(clip), cmd)
-
-    def test_preset_applied_and_defaults_to_config(self):
-        cmd = build_concat_command(self.clips, [2.0, 2.0, 2.0], self.output, cut_duration=2.0)
-        self.assertEqual(cmd[cmd.index("-preset") + 1], config.FFMPEG_PRESET)
-
-
-class TestComposeVideoMutedOriginal(unittest.TestCase):
-    """orig_volume=0 (on-site audio fully muted) used to crash compose_video()
-    with `math domain error` from `math.log10(0)` in the BGM-relative-to-
-    original calibration. There's nothing left to be relative to once the
-    original is silent, so that calibration should be skipped entirely."""
-
-    def setUp(self):
-        patcher_probe_dur = patch("src.quote_video.video_composer.probe_duration", return_value=16.0)
-        patcher_probe_vol = patch("src.quote_video.video_composer.probe_mean_volume_db", return_value=-20.0)
+        patcher_probe_dur = patch("src.quote_video.video_composer.probe_duration", return_value=3.3)
         patcher_run = patch("src.quote_video.video_composer._run")
         self.mock_probe_dur = patcher_probe_dur.start()
-        self.mock_probe_vol = patcher_probe_vol.start()
         self.mock_run = patcher_run.start()
         self.addCleanup(patcher_probe_dur.stop)
-        self.addCleanup(patcher_probe_vol.stop)
         self.addCleanup(patcher_run.stop)
 
-    def test_does_not_raise_and_skips_relative_bgm_probing(self):
+    def test_probes_every_scene_and_runs_once(self):
         compose_video(
-            video_path=Path("video.mp4"),
+            [(Path("hook.mp4"), 2.0), (Path("outro.mp4"), 2.0)],
             subtitle_path=Path("out.ass"),
             bgm_path=Path("bgm.mp3"),
-            output_path=Path("final.mp4"),
-            orig_volume=0,
-            bgm_volume=0.70,
+            output_path=Path("output/final.mp4"),
+            bgm_volume=0.3,
+            fade_duration=0.5,
+            font_name="Griun Fromsol",
+            margin_v=440,
         )
-        # with orig_volume<=0 there's no "relative to original" reference,
-        # so probe_mean_volume_db shouldn't even be called
-        self.mock_probe_vol.assert_not_called()
+        self.assertEqual(self.mock_probe_dur.call_count, 2)
+        self.mock_run.assert_called_once()
 
-    def test_falls_back_to_flat_bgm_ratio_in_the_filter(self):
-        compose_video(
-            video_path=Path("video.mp4"),
-            subtitle_path=Path("out.ass"),
-            bgm_path=Path("bgm.mp3"),
-            output_path=Path("final.mp4"),
-            orig_volume=0,
-            bgm_volume=0.70,
-        )
-        command = self.mock_run.call_args.args[0]
-        filter_complex = command[command.index("-filter_complex") + 1]
-        expected_db = 20 * math.log10(0.70)
-        self.assertIn(f"volume={expected_db}dB", filter_complex)
-        self.assertIn("[0:a]volume=0[a_orig]", filter_complex)
-
-    def test_positive_orig_volume_still_uses_relative_calibration(self):
-        compose_video(
-            video_path=Path("video.mp4"),
-            subtitle_path=Path("out.ass"),
-            bgm_path=Path("bgm.mp3"),
-            output_path=Path("final.mp4"),
-            orig_volume=0.7,
-            bgm_volume=0.20,
-        )
-        self.mock_probe_vol.assert_called()
+    def test_no_relative_bgm_probing_happens(self):
+        # there's no narration/on-site track yet to calibrate BGM against
+        # (step 3 adds that) — compose_video must not call probe_mean_volume_db.
+        with patch("src.quote_video.video_composer.probe_mean_volume_db") as mock_probe_vol:
+            compose_video(
+                [(Path("hook.mp4"), 2.0)],
+                subtitle_path=Path("out.ass"),
+                bgm_path=Path("bgm.mp3"),
+                output_path=Path("output/final.mp4"),
+                bgm_volume=0.3,
+                fade_duration=0.5,
+                font_name="Griun Fromsol",
+                margin_v=440,
+            )
+            mock_probe_vol.assert_not_called()
 
 
 class TestRemainingSeconds(unittest.TestCase):
@@ -234,15 +230,10 @@ class TestComputeBgmGainDb(unittest.TestCase):
         self.assertAlmostEqual(gain, 0.0)
 
     def test_targets_20_percent_relative_to_louder_original(self):
-        # original is loud (-20.3dB), bgm's raw level happens to match it;
-        # a 0.2 ratio should land bgm ~13.98dB below the original's level,
-        # i.e. a negative gain cutting the raw bgm level down further.
         gain = compute_bgm_gain_db(orig_mean_db=-20.3, bgm_mean_db=-20.3, bgm_volume=0.20)
         self.assertAlmostEqual(gain, 20 * math.log10(0.20), places=4)
 
     def test_boosts_a_quiet_bgm_file_up_to_the_target(self):
-        # bgm file is much quieter than the original on its own; reaching a
-        # 20%-relative target requires a positive (boosting) gain.
         gain = compute_bgm_gain_db(orig_mean_db=-10.0, bgm_mean_db=-40.0, bgm_volume=0.20)
         self.assertGreater(gain, 0.0)
 
