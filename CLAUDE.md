@@ -90,8 +90,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 새로 만들 것
 
-- LLM 대본 생성(`/reels/scripts`): 장면별 자막, 캡션(≤2,200자), 해시태그(≤30개), 가격 추출
-- 콘셉트별 전환(xfade)·자막 스타일 (2종, 디자인 미정이므로 JSON 값으로 교체 가능하게)
+- **(완료)** LLM 대본 생성 로직(`script_generator.generate_script()`): 장면별 자막, 캡션(≤2,200자), 해시태그(≤30개), 가격 추출.
+  `/reels/scripts` 엔드포인트 자체(비동기 job, script_id 발급·조회)는 아직 — 그건 4단계 FastAPI 작업.
+- 콘셉트별 전환(xfade)·자막 스타일 (2종, 디자인 미정이므로 JSON 값으로 교체 가능하게) — xfade는 완료, 스타일은 디자인 대기 중
 - 썸네일(hook 장면에서 1080x1920 JPG)
 - 진행 단계 보고: `preparing → composing → uploading` (TTS 없으므로 narrating 단계 자체가 없다), 한국어 label 포함
 - S3 다운로드/업로드, Next.js 콜백 전송
@@ -103,8 +104,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    → `templates/simple.json` 기반 13초 MP4. 순서: 템플릿 JSON 스키마 → 9:16 크롭 정규화 → 장면 길이 맞춤 → ASS 자막 → BGM.
    길이가 제각각(2초/5초/15초)인 영상과 가로 영상으로 테스트했다.
 2. **(완료)** 메뉴 2·3개 장면 규칙, 전환 효과(xfade), 콘셉트 2종(`christmas.json` 추가)
-3. **(다음)** LLM 대본 생성
-4. FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체
+3. **(완료)** LLM 대본 생성 (`script_generator.py`) — 단, FastAPI `/reels/scripts` 엔드포인트 자체는 4단계
+4. **(다음)** FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체
 5. S3 연동, Docker, 속도 측정(목표 30초)
 
 각 단계마다 unittest를 추가한다. 기존 테스트 중 폐기된 규칙(2초 컷, 컷당 자막 2줄, 현장음)에 묶인 것은 지우지 말고 새 규칙에 맞게 고치거나, 지워야 하면 사용자에게 먼저 알린다.
@@ -115,7 +116,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 콜백 경로·서버 간 인증 방식 (가정: `POST {NEXT_BASE_URL}/api/internal/reels/callback`, 헤더 API 키)
 - S3 키 규칙·버킷 이름 (가정: `uploads/{user_id}/{ad_id}/{scene_index}.mp4`, `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg`)
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
-- LLM 제공자 (환경변수로 교체 가능하게)
+- LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(표준 라이브러리 `urllib`만 사용, SDK 의존성 없음)가 기본값이지만 placeholder다.
+  `LlmClient` 프로토콜만 맞추면 다른 제공자로 교체 가능(`generate_script(..., llm_client=...)`), `ANTHROPIC_API_KEY`/`LLM_MODEL` 환경변수로 키·모델 교체.
 - 심플·크리스마스 콘셉트의 디자인 전체
 
 ## 명령어
