@@ -19,7 +19,7 @@
 공통 규칙
 
 - 사용자는 고정 계정 user_id = 1. 가게 이름·주소는 입력받지 않으므로 Next.js가 회원 정보에서 채워 보낸다.
-- 파일은 S3 객체 키로 주고받는다. 브라우저에서 바로 열리는 URL로 바꾸는 것은 Next.js가 맡는다. 기존 Supabase Storage 파일은 `storage` 값(`s3` | `supabase`)으로 구분하고, 생략하면 `s3`.
+- 파일은 Supabase Storage 객체 키로 주고받는다(2026-11-02 결정: 백엔드가 Supabase Storage를 쓰기로 해서 S3 연동은 하지 않는다). 브라우저에서 바로 열리는 URL로 바꾸는 것은 Next.js가 맡는다. `storage` 필드(`s3` | `supabase`)는 과거 구조 호환용으로 남겨 두지만 실제로는 항상 `supabase`다.
 - 렌더링 목표 1건당 30초 이내. 결과물은 1080×1920 MP4(H.264/AAC), 13~15초.
 - 시간은 ISO 8601, 길이는 초, 처리 시간은 밀리초.
 
@@ -161,10 +161,10 @@ SC-07에서 재료 업로드가 끝난 뒤 Next.js가 호출한다. `ad_id`는 N
     { "menu_index": 0, "name": "창억떡", "description": "쫀득한 식감, 한 팩 5,000원" }
   ],
   "media": [
-    { "scene_index": 0, "menu_index": null, "key": "uploads/1/ad_20261120_0042/0.mp4", "storage": "s3" },
-    { "scene_index": 1, "menu_index": 0, "key": "uploads/1/ad_20261120_0042/1.mp4", "storage": "s3" },
-    { "scene_index": 2, "menu_index": 0, "key": "uploads/1/ad_20261120_0042/2.mp4", "storage": "s3" },
-    { "scene_index": 3, "menu_index": null, "key": "uploads/1/ad_20261120_0042/3.mp4", "storage": "s3" }
+    { "scene_index": 0, "menu_index": null, "key": "uploads/1/ad_20261120_0042/0.mp4", "storage": "supabase" },
+    { "scene_index": 1, "menu_index": 0, "key": "uploads/1/ad_20261120_0042/1.mp4", "storage": "supabase" },
+    { "scene_index": 2, "menu_index": 0, "key": "uploads/1/ad_20261120_0042/2.mp4", "storage": "supabase" },
+    { "scene_index": 3, "menu_index": null, "key": "uploads/1/ad_20261120_0042/3.mp4", "storage": "supabase" }
   ],
   "scenes": [
     { "scene_index": 0, "text": "30년 전통 해오름 떡집" },
@@ -282,9 +282,10 @@ error에는 code와 함께 생활 한국어 안내 문구(message)를 넣는다.
 
 - [ ] 작업 등록 방식: Next.js → 미디어 서버 직접 호출인지, SQS 큐인지
 - [ ] 콜백 경로와 서버 간 인증 방식, 콜백 대신 Supabase 직접 기록을 원하는지
-- [ ] S3 키 규칙(uploads/..., results/...)과 버킷 이름
+- [x] 스토리지: S3가 아니라 Supabase Storage를 쓴다(2026-11-02 확인)
+- [ ] Supabase Storage 버킷 이름과 경로 규칙(uploads/..., results/...)
 - [ ] user_id = 1 회원 정보의 가게 이름을 요청에 채워 보내는지
-- [ ] 광고 삭제 시 S3 결과 파일도 지울지
+- [ ] 광고 삭제 시 Supabase Storage 결과 파일도 지울지
 - [ ] 해커톤 FastAPI 코드의 기존 엔드포인트를 유지할지, 이 명세로 바꿀지
 
 지우 (이미지 AI)

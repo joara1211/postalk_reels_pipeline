@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 장면별로 촬영하면 AI가 인스타그램용 광고(카드뉴스·릴스)를 만들어 POSTALK 공식 인스타그램에 게시한다.
 
 - 이 레포 담당: **릴스 파이프라인(아라)**. 입력을 받아 MP4·썸네일·캡션을 내놓기까지가 범위다.
-- 범위 밖: 화면(준서, React PWA), Next.js API·Supabase·S3 발급·인스타 게시(성준), 카드뉴스 이미지 AI(지우).
+- 범위 밖: 화면(준서, React PWA), Next.js API·Supabase 발급·인스타 게시(성준), 카드뉴스 이미지 AI(지우).
 - 실행 위치: AWS EC2의 Docker 기반 **FastAPI + FFmpeg** 서비스. Next.js 백엔드가 작업을 등록하고,
   미디어 서버는 상태·결과를 콜백으로 돌려준다. 프론트는 이 서버를 직접 호출하지 않는다.
 
@@ -24,9 +24,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 [대본] POST /reels/scripts  (정보 입력 직후, 촬영 중 백그라운드)
    가게·메뉴 정보 → LLM(JSON 구조화 출력) → 장면별 자막 + 캡션·해시태그
 [생성] POST /reels/renders  (자막 확정 + 재료 업로드 후)
-   S3 영상 다운로드 → 정규화(1080x1920, 30fps, 9:16 중앙 크롭, 원본 오디오 제거)
+   Supabase Storage 영상 다운로드 → 정규화(1080x1920, 30fps, 9:16 중앙 크롭, 원본 오디오 제거)
    → 장면 길이 맞춤 → ASS 자막 → 장면 합성 + 전환(xfade) + BGM
-   → MP4(H.264/AAC) + 썸네일 → S3 업로드 → 콜백
+   → MP4(H.264/AAC) + 썸네일 → Supabase Storage 업로드 → 콜백
 ```
 
 ### 확정된 결정 (사용자와 합의됨, 임의로 바꾸지 말 것)
@@ -95,7 +95,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **(완료)** 콘셉트별 전환(xfade) — 자막 스타일 자체는 디자인 대기 중(JSON 값으로 교체 가능하게 되어 있음)
 - **(완료)** 썸네일(hook 장면에서 1080x1920 JPG) — 원본 훅 영상이 아니라 합성 끝난 최종 MP4 초반 프레임에서 뽑는다(`video_composer.generate_thumbnail()`), 이미 크롭된 상태라 추가 스케일링이 필요 없어서.
 - **(완료)** 진행 단계 보고: `preparing → composing → uploading` (TTS 없으므로 narrating 단계 자체가 없다), 한국어 label 포함.
-- **(완료, 로컬 가정)** 업로드/다운로드·콜백 전송 — S3 대신 `STORAGE_ROOT` 환경변수가 가리키는 로컬 디렉터리를 버킷처럼 쓴다
+- **(완료, 로컬 가정)** 업로드/다운로드·콜백 전송 — Supabase Storage 대신 `STORAGE_ROOT` 환경변수가 가리키는 로컬 디렉터리를 버킷처럼 쓴다
   (`media[].key`/`results/.../reel.mp4` 그대로 `STORAGE_ROOT / key`로 resolve). 콜백은 `NEXT_BASE_URL`이 설정된 경우에만 실제로 보내고,
   안 보내면 조용히 스킵(로컬 개발용). 둘 다 "아직 팀과 확정 안 된 것" 참고.
 - **(완료)** 오류 코드: `CAPTION_TOO_LONG`, `SCENE_MISMATCH`, `ALREADY_RENDERING`, `NO_USABLE_MEDIA`, `RENDER_FAILED`, `TIMEOUT` 전부 구현.
@@ -108,8 +108,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **(완료)** 메뉴 2·3개 장면 규칙, 전환 효과(xfade), 콘셉트 2종(`christmas.json` 추가)
 3. **(완료)** LLM 대본 생성 (`script_generator.py`)
 4. **(완료)** FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체 (`api.py`, `job_store.py`) —
-   업로드/결과 저장은 S3가 아니라 로컬 `STORAGE_ROOT`를 S3 버킷처럼 흉내만 냄. 작업 상태도 프로세스 재시작하면 날아가는 인메모리 dict.
-5. **(다음)** S3 연동, Docker, 속도 측정(목표 30초) — `STORAGE_ROOT`를 실제 S3 get/put으로, 인메모리 `JobStore`를 영속 저장소로 교체
+   업로드/결과 저장은 Supabase Storage가 아니라 로컬 `STORAGE_ROOT`를 그 버킷처럼 흉내만 냄. 작업 상태도 프로세스 재시작하면 날아가는 인메모리 dict.
+5. **(다음)** Supabase Storage 연동(2026-11-02 결정: 백엔드가 Supabase Storage를 쓰기로 해서 S3 연동은 불필요해졌다 — 아래 참고),
+   Docker, 속도 측정(목표 30초) — `STORAGE_ROOT`를 실제 Supabase Storage 업로드/다운로드로, 인메모리 `JobStore`를 영속 저장소로 교체
 
 각 단계마다 unittest를 추가한다. 기존 테스트 중 폐기된 규칙(2초 컷, 컷당 자막 2줄, 현장음)에 묶인 것은 지우지 말고 새 규칙에 맞게 고치거나, 지워야 하면 사용자에게 먼저 알린다.
 
@@ -119,9 +120,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 콜백 경로·서버 간 인증 방식 — 구현은 `POST {NEXT_BASE_URL}/api/internal/reels/callback` + 헤더 `X-Internal-Api-Key`로
   가정하고 `job_store.send_callback()`에 이미 짜 놓았다. `NEXT_BASE_URL`/`REELS_CALLBACK_API_KEY` 환경변수로만 바뀐다 — 실제
   경로·헤더 이름이 확정되면 그 함수 하나만 고치면 된다. `NEXT_BASE_URL` 미설정 시 콜백은 조용히 스킵(로컬 개발 지원용).
-- S3 키 규칙·버킷 이름 — 구현은 `uploads/{user_id}/{ad_id}/{scene_index}.mp4`, `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg`
-  가정대로 키를 만들지만, 실제 S3가 아니라 `STORAGE_ROOT`(환경변수, 기본값 `./storage`) 밑 로컬 파일로 읽고 쓴다.
-  `media[].storage`(s3/supabase) 필드는 받기만 하고 무시한다 — S3 연동(5단계)에서 `api.py`의 파일 읽기/쓰기 지점만 바꾸면 된다.
+- **S3는 안 쓴다 (2026-11-02 결정)** — 백엔드가 Supabase Storage를 쓰기로 해서 S3 연동 자체가 필요 없어졌다.
+  `docs/reels-api-spec.md`의 "파일은 S3 객체 키로 주고받는다"도 Supabase Storage 기준으로 고쳤다.
+- Supabase Storage 버킷 이름·경로 규칙 — 아직 미정. 지금 구현은 `uploads/{user_id}/{ad_id}/{scene_index}.mp4`,
+  `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg` 가정대로 키(경로)를 만들지만, 실제 Supabase Storage가 아니라
+  `STORAGE_ROOT`(환경변수, 기본값 `./storage`) 밑 로컬 파일로 읽고 쓴다. `media[].storage` 필드는 받기만 하고 무시한다 —
+  Supabase Storage 연동(5단계)에서 `api.py`의 파일 읽기/쓰기 지점만 Supabase 클라이언트 호출로 바꾸면 된다.
 - 작업 상태 저장소 — 지금은 `job_store.JobStore`가 프로세스 메모리의 dict다. 재시작하면 모든 진행 중 작업이 사라지고,
   워커를 여러 개 띄우면 서로 다른 메모리를 본다(단일 워커 가정). Docker/다중 워커로 갈 때(5·6단계) Supabase나 Redis 같은
   공유 저장소로 바꿔야 한다.
@@ -143,5 +147,5 @@ python -m src.quote_video.pipeline --request tests/fixtures/render_request_1menu
 ```
 
 개발 환경은 Windows(winget으로 설치한 FFmpeg), 배포는 Linux Docker다. 경로는 `pathlib`로 다루고 OS 의존 코드를 넣지 않는다.
-API 키(LLM, AWS)는 `.env`로만 받고 커밋하지 않는다. 서버 환경변수: `STORAGE_ROOT`(기본 `./storage`), `NEXT_BASE_URL`·
+API 키(LLM, Supabase)는 `.env`로만 받고 커밋하지 않는다. 서버 환경변수: `STORAGE_ROOT`(기본 `./storage`), `NEXT_BASE_URL`·
 `REELS_CALLBACK_API_KEY`(콜백, 미설정 시 스킵), `ANTHROPIC_API_KEY`·`LLM_MODEL`(대본 생성).
