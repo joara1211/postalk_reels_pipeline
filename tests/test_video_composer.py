@@ -230,16 +230,6 @@ class TestBuildFfmpegCommand(unittest.TestCase):
         self.assertIn("vsnow_img", filter_complex[:first_overlay + 20])
         self.assertIn("voverlay_img", filter_complex[second_overlay - 40:second_overlay + 20])
 
-    def test_overlays_use_shortest_so_they_actually_reach_eof(self):
-        # without shortest=1, overlay's default eof_action=repeat keeps it
-        # running (frozen on the main input) until its longest input ends,
-        # which for a -stream_loop -1 input is never -- fatal once
-        # opening/closing cards concat after it (concat hangs waiting for
-        # an EOF that never comes). See build_ffmpeg_command's docstring.
-        cmd = self._build(animated_overlay_path=Path("snow.mov"), overlay_path=Path("deco.png"))
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertEqual(filter_complex.count("overlay=0:0:shortest=1"), 2)
-
     def test_animated_overlay_alone_still_fades_with_the_rest(self):
         cmd = self._build(animated_overlay_path=Path("snow.mov"), fade_duration=0.5)
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
@@ -250,67 +240,6 @@ class TestBuildFfmpegCommand(unittest.TestCase):
     def test_output_path_is_last_argument(self):
         cmd = self._build()
         self.assertEqual(cmd[-1], str(self.output))
-
-    def test_color_grade_omitted_by_default(self):
-        cmd = self._build()
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertNotIn("eq=", filter_complex)
-        self.assertNotIn("colorbalance=", filter_complex)
-        self.assertNotIn("vignette=", filter_complex)
-
-    def test_color_grade_filter_inserted_between_concat_and_subtitles(self):
-        grade = dict(
-            saturation=1.2, contrast=1.08, brightness=0.02,
-            warm_rs=0.08, warm_gs=0.02, warm_bs=-0.08, warm_rm=0.06, warm_bm=-0.06,
-            vignette="PI/4.5",
-        )
-        cmd = self._build(color_grade=grade)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("[vconcat]eq=saturation=1.2:contrast=1.08:brightness=0.02,"
-                       "colorbalance=rs=0.08:gs=0.02:bs=-0.08:rm=0.06:bm=-0.06,vignette=PI/4.5[vgraded]", filter_complex)
-        self.assertIn("[vgraded]subtitles=", filter_complex)
-
-    def test_no_card_input_or_concat_when_cards_omitted(self):
-        cmd = self._build()
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertNotIn("vwithcards", filter_complex)
-        self.assertNotIn(str(Path("open.mp4")), cmd)
-
-    def test_opening_and_closing_card_inputs_follow_bgm(self):
-        cmd = self._build(opening_card_path=Path("open.mp4"), opening_card_duration=1.0,
-                           closing_card_path=Path("close.mp4"), closing_card_duration=1.0)
-        i_bgm = cmd.index(str(self.bgm))
-        i_open = cmd.index(str(Path("open.mp4")))
-        i_close = cmd.index(str(Path("close.mp4")))
-        self.assertLess(i_bgm, i_open)
-        self.assertLess(i_open, i_close)
-
-    def test_cards_concatenated_around_main_content_before_fade(self):
-        cmd = self._build(opening_card_path=Path("open.mp4"), opening_card_duration=1.0,
-                           closing_card_path=Path("close.mp4"), closing_card_duration=1.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("[vopen][vcaptioned][vclose]concat=n=3:v=1:a=0[vwithcards]", filter_complex)
-        concat_pos = filter_complex.index("concat=n=3")
-        fade_pos = filter_complex.index("[vwithcards]fade=t=in")
-        self.assertGreater(fade_pos, concat_pos)
-
-    def test_only_opening_card_concats_two(self):
-        cmd = self._build(opening_card_path=Path("open.mp4"), opening_card_duration=1.0)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("[vopen][vcaptioned]concat=n=2:v=1:a=0[vwithcards]", filter_complex)
-
-    def test_card_duration_extends_fade_out_start_and_total_duration(self):
-        # scenes sum to 6.5s; +1s opening +1s closing = 8.5s full duration
-        cmd = self._build(opening_card_path=Path("open.mp4"), opening_card_duration=1.0,
-                           closing_card_path=Path("close.mp4"), closing_card_duration=1.0, fade_duration=0.5)
-        filter_complex = cmd[cmd.index("-filter_complex") + 1]
-        self.assertIn("fade=t=out:st=8.0:d=0.5", filter_complex)
-        self.assertIn("atrim=duration=8.500000", filter_complex)
-        self.assertEqual(cmd[cmd.index("-t") + 1], "8.500000")
-
-    def test_without_cards_total_duration_is_just_scenes(self):
-        cmd = self._build(fade_duration=0.5)
-        self.assertEqual(cmd[cmd.index("-t") + 1], "6.500000")
 
     def test_preset_applied_and_defaults_to_config(self):
         from src.quote_video import config

@@ -194,33 +194,6 @@ def _xfade_chain(
     return statements
 
 
-def _color_grade_filter(cfg: dict) -> str:
-    """Build the `eq,colorbalance,vignette` chain for `render.color_grade`
-    (see templates/christmas.json) -- a warm-tone/saturation/vignette pass
-    meant to fix real camera footage that reads as cold/dull next to the
-    hand-drawn decor, not something the pre-rendered opening/closing cards
-    (already graded by hand in scripts/generate_christmas_assets.py) need."""
-    return (
-        f"eq=saturation={cfg['saturation']}:contrast={cfg['contrast']}:brightness={cfg['brightness']},"
-        f"colorbalance=rs={cfg['warm_rs']}:gs={cfg['warm_gs']}:bs={cfg['warm_bs']}:"
-        f"rm={cfg['warm_rm']}:bm={cfg['warm_bm']},"
-        f"vignette={cfg['vignette']}"
-    )
-
-
-def _card_fit_filter(label_in: str, label_out: str, duration: float, *, width: int, height: int, fps: int) -> str:
-    """Scale/crop/trim a pre-rendered opening/closing card clip (see
-    scripts/generate_christmas_assets.py) onto the output canvas exactly
-    like a scene clip, even though it's already the right size/fps/length
-    -- defensive against the asset drifting out of spec without a silent
-    mismatch."""
-    return (
-        f"[{label_in}]scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},fps={fps},setsar=1,"
-        f"trim=duration={duration:.6f},setpts=PTS-STARTPTS[{label_out}]"
-    )
-
-
 def build_ffmpeg_command(
     scene_clips: list[SceneClip],
     subtitle_path: Path,
@@ -236,11 +209,6 @@ def build_ffmpeg_command(
     transition_duration: float = 0.0,
     overlay_path: Path | None = None,
     animated_overlay_path: Path | None = None,
-    color_grade: dict | None = None,
-    opening_card_path: Path | None = None,
-    opening_card_duration: float = 0.0,
-    closing_card_path: Path | None = None,
-    closing_card_duration: float = 0.0,
     font_dir: Path = config.FONT_DIR,
     width: int = config.VIDEO_WIDTH,
     height: int = config.VIDEO_HEIGHT,
@@ -286,33 +254,12 @@ def build_ffmpeg_command(
     equivalent of the `aloop` filter — so a short seamless-loop clip (see
     assets/overlay/christmas_snow.mov, 3s/90 frames) can cover a render of
     any length; the global `-t` at the end trims it along with everything
-    else. Both `overlay` calls pass `shortest=1` -- without it, `overlay`
-    defaults to `eof_action=repeat` and keeps running (frozen on the main
-    input's last frame) until its *longest* input ends, which for a
-    `-stream_loop -1` input is never; harmless on its own since `-t` cuts
-    it off regardless, but it means this stage's output never reaches a
-    real EOF -- fatal once opening/closing cards `concat` after it, since
-    `concat` waits for each input to actually end before moving to the
-    next and would hang on `vclose` forever otherwise.
-
-    `color_grade`, when given, is `render.color_grade` from the template
-    (see `_color_grade_filter()`) -- applied to the scene footage right
-    after concat/xfade, before captions/overlays, so it only touches real
-    camera footage and not the already-on-palette opening/closing cards.
-
-    `opening_card_path`/`closing_card_path`, when given, are pre-rendered
-    clips (see scripts/generate_christmas_assets.py) concatenated around
-    the main content *after* captions/overlays/color-grade but *before*
-    the start/end fade, so the fade wraps the whole thing (card -> main ->
-    card) instead of popping the cards in over a faded edge. BGM keeps
-    playing underneath them: its `atrim`/`afade` are computed against the
-    card-inclusive total duration, not just the main content's."""
+    else."""
     if not scene_clips:
         raise ValueError("scene_clips must not be empty")
 
     total_duration = sum(c.target_duration for c in scene_clips)
-    full_duration = total_duration + opening_card_duration + closing_card_duration
-    fade_out_start = max(full_duration - fade_duration, 0.0)
+    fade_out_start = max(total_duration - fade_duration, 0.0)
     if bgm_gain_db is None:
         bgm_gain_db = 20 * math.log10(bgm_volume)
 
@@ -340,18 +287,13 @@ def build_ffmpeg_command(
     else:
         filters.append("".join(f"[{l}]" for l in v_labels) + f"concat=n={len(scene_clips)}:v=1:a=0[vconcat]")
 
-    current_label = "vconcat"
-    if color_grade:
-        filters.append(f"[{current_label}]{_color_grade_filter(color_grade)}[vgraded]")
-        current_label = "vgraded"
-
     subtitle_arg = _escape_filter_path(subtitle_path)
     fontsdir_arg = _escape_filter_path(font_dir)
-    filters.append(
-        f"[{current_label}]subtitles='{subtitle_arg}':fontsdir='{fontsdir_arg}':"
-        f"force_style='FontName={font_name},MarginV={margin_v}'[vcaptioned]"
-    )
     current_label = "vcaptioned"
+    filters.append(
+        f"[vconcat]subtitles='{subtitle_arg}':fontsdir='{fontsdir_arg}':"
+        f"force_style='FontName={font_name},MarginV={margin_v}'[{current_label}]"
+    )
 
     bgm_input_index = len(scene_clips)
     next_input_index = bgm_input_index + 1
@@ -360,41 +302,15 @@ def build_ffmpeg_command(
         snow_input_index = next_input_index
         next_input_index += 1
         filters.append(f"[{snow_input_index}:v]scale={width}:{height}[vsnow_img]")
-        filters.append(f"[{current_label}][vsnow_img]overlay=0:0:shortest=1[vsnow_src]")
+        filters.append(f"[{current_label}][vsnow_img]overlay=0:0[vsnow_src]")
         current_label = "vsnow_src"
 
     if overlay_path:
         overlay_input_index = next_input_index
         next_input_index += 1
         filters.append(f"[{overlay_input_index}:v]scale={width}:{height}[voverlay_img]")
-        filters.append(f"[{current_label}][voverlay_img]overlay=0:0:shortest=1[voverlay_src]")
+        filters.append(f"[{current_label}][voverlay_img]overlay=0:0[voverlay_src]")
         current_label = "voverlay_src"
-
-    card_labels: list[str] = []
-    opening_card_input_index = closing_card_input_index = None
-    if opening_card_path:
-        opening_card_input_index = next_input_index
-        next_input_index += 1
-        filters.append(
-            _card_fit_filter(f"{opening_card_input_index}:v", "vopen", opening_card_duration,
-                              width=width, height=height, fps=fps)
-        )
-        card_labels.append("vopen")
-    card_labels.append(current_label)
-    if closing_card_path:
-        closing_card_input_index = next_input_index
-        next_input_index += 1
-        filters.append(
-            _card_fit_filter(f"{closing_card_input_index}:v", "vclose", closing_card_duration,
-                              width=width, height=height, fps=fps)
-        )
-        card_labels.append("vclose")
-
-    if len(card_labels) > 1:
-        filters.append(
-            "".join(f"[{l}]" for l in card_labels) + f"concat=n={len(card_labels)}:v=1:a=0[vwithcards]"
-        )
-        current_label = "vwithcards"
 
     filters.append(
         f"[{current_label}]fade=t=in:st=0:d={fade_duration},"
@@ -403,7 +319,7 @@ def build_ffmpeg_command(
 
     filters.append(
         f"[{bgm_input_index}:a]volume={bgm_gain_db}dB,aloop=loop=-1:size=2147483647,"
-        f"atrim=duration={full_duration:.6f},asetpts=PTS-STARTPTS,"
+        f"atrim=duration={total_duration:.6f},asetpts=PTS-STARTPTS,"
         f"afade=t=out:st={fade_out_start}:d={fade_duration}[aout]"
     )
 
@@ -415,10 +331,6 @@ def build_ffmpeg_command(
         command += ["-stream_loop", "-1", "-i", str(animated_overlay_path)]
     if overlay_path:
         command += ["-i", str(overlay_path)]
-    if opening_card_path:
-        command += ["-i", str(opening_card_path)]
-    if closing_card_path:
-        command += ["-i", str(closing_card_path)]
     command += [
         "-filter_complex", ";".join(filters),
         "-map", "[vout]",
@@ -429,7 +341,7 @@ def build_ffmpeg_command(
         "-r", str(fps),
         "-c:a", "aac",
         "-movflags", "+faststart",
-        "-t", f"{full_duration:.6f}",
+        "-t", f"{total_duration:.6f}",
         str(output_path),
     ]
     return command

@@ -121,17 +121,14 @@ def _escape_ass_text(text: str) -> str:
     return text.replace("{", "(").replace("}", ")")
 
 
-def _pop_in_tag(scale_from: int = 80, scale_peak: int = 105, scale_settle: int = 100) -> str:
-    """ASS `\\t` transform override that scales a line's text up on entry:
-    `scale_from`% at t=0 -> `scale_peak`% at 100ms -> `scale_settle`% at
-    200ms, relative to each Dialogue event's own start time (the `\\t`
-    times are offsets from the line's Start, not absolute) — so this can be
-    prefixed onto any event's Text without touching the timing logic."""
-    return (
-        f"{{\\fscx{scale_from}\\fscy{scale_from}"
-        f"\\t(0,100,\\fscx{scale_peak}\\fscy{scale_peak})"
-        f"\\t(100,200,\\fscx{scale_settle}\\fscy{scale_settle})}}"
-    )
+def _colorize_alternating(text: str, color_a: str, color_b: str) -> str:
+    """Wrap each character of an (already brace-escaped) caption line with
+    an ASS inline `\\c` override, alternating between `color_a`/`color_b`
+    (each a bare `BBGGRR` hex string, no `&H`/`&` — added here) — used for
+    a festive two-tone letter-by-letter look instead of one flat
+    PrimaryColour for the whole line. `\\c` only overrides the color, not
+    alpha, so it layers on top of the Style's own (opaque) alpha fine."""
+    return "".join(f"{{\\c&H{color_a if i % 2 == 0 else color_b}&}}{ch}" for i, ch in enumerate(text))
 
 
 def build_ass(
@@ -142,14 +139,11 @@ def build_ass(
     font_name: str = "Griun Fromsol",
     font_size: int = 64,
     primary_color: str = "&H00FFFFFF",
-    outline_color: str = "&H00000000",
     back_color: str = "&H80000000",
     border_style: int = 1,
     outline: int = 2,
-    bold: int = 0,
-    shadow: int = 0,
     margin_v: int = 440,
-    pop_in: bool = False,
+    alternating_colors: tuple[str, str] | None = None,
 ) -> str:
     """Render timed captions as a minimal .ass script with an explicit
     PlayResX/PlayResY matching the real output canvas.
@@ -170,13 +164,7 @@ def build_ass(
     finalized yet, so it must stay editable there, not hardcoded here).
     `border_style=3` + a non-transparent `back_color` draws a solid caption
     box instead of an outline, per CLAUDE.md's "자막은 우선 전부 ASS로
-    만든다(BorderStyle=3으로 박스형 가능)".
-
-    `shadow` (ASS Shadow field, pixels) only draws anything if > 0 -- it
-    reuses `back_color` as the drop-shadow color, offset down-right, same
-    as libass's own behavior; the field is 0/unused unless a caller opts
-    in. `pop_in=True` prefixes every line with `_pop_in_tag()`'s scale-up
-    entrance animation instead of one flat size."""
+    만든다(BorderStyle=3으로 박스형 가능)"."""
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -188,16 +176,21 @@ def build_ass(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font_name},{font_size},{primary_color},&H000000FF,{outline_color},{back_color},"
-        f"{bold},0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,40,40,{margin_v},1\n"
+        f"Style: Default,{font_name},{font_size},{primary_color},&H000000FF,&H00000000,{back_color},"
+        f"0,0,0,0,100,100,0,0,{border_style},{outline},0,2,40,40,{margin_v},1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
-    pop_tag = _pop_in_tag() if pop_in else ""
+    def _render_text(t: CaptionTiming) -> str:
+        escaped = _escape_ass_text(t.line.text)
+        if alternating_colors is None:
+            return escaped
+        return _colorize_alternating(escaped, *alternating_colors)
+
     events = "\n".join(
         f"Dialogue: 0,{_format_ass_timestamp(t.start)},{_format_ass_timestamp(t.end)},"
-        f"Default,,0,0,0,,{pop_tag}{_escape_ass_text(t.line.text)}"
+        f"Default,,0,0,0,,{_render_text(t)}"
         for t in timings
     )
     return header + events + "\n"

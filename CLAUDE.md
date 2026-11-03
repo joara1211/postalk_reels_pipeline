@@ -43,20 +43,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   코드에 콘셉트별 분기를 하드코딩하지 않는다. 디자인이 정해지기 전까지는 임시 값(기본 페이드, 흰 글씨+반투명 박스, 임의 BGM)으로 둔다.
   두 콘셉트 모두 **자막 사용(has_captions=true)**. `has_captions` 필드는 프론트 분기용으로 남겨 두되 false인 콘셉트는 현재 없다.
   **(2026-11-02 추가)** 장식 오버레이(테두리·스티커류)도 콘셉트별 선택 사항으로 지원한다 — `render.overlay.image`에 투명
-  배경 PNG 경로를 넣으면 자막 번인 후·페이드 전에 합성된다(`video_composer.build_ffmpeg_command()`). `simple.json`은
-  없음 — 지우가 실제 디자인 주면 콘셉트에 그 경로를 달면 된다.
-  **(2026-11-03 christmas 전면 재설계)** "크리스마스 느낌이 약하고 산만하다"는 피드백으로 christmas만 다시 손봤다
-  (simple은 안 건드림). 색 팔레트를 4색(레드 #B3001B/그린 #0F4D2E/골드 #F2C14E/크림 #FFF6E5)으로 통일하고,
-  실사 촬영분엔 `render.color_grade`(따뜻한 톤+채도+비네팅, `video_composer._color_grade_filter()`)를 입혀서
-  차갑고 산만해 보이던 걸 보정했다. 흩어진 스티커 테두리는 걷어내고 가랜드+오너먼트(흔들림)+전구(반짝임)+보케+
-  3단 눈+하단 눈더미를 하나의 애니메이션 루프(`assets/overlay/christmas_scene.mov`, `render.animated_overlay`
-  하나로 통합, 정적 `render.overlay`는 이제 안 씀)로 바꿨다. 자막은 한 글자씩 색 바꾸던 걸 걷어내고 크림 글씨+
-  레드 굵은 외곽선+반투명 그림자+팝인 애니메이션으로(`subtitle_sync.build_ass()`의 `outline_color`/`bold`/
-  `shadow`/`pop_in`). 1초짜리 오프닝/엔딩 타이틀 카드(`render.opening_card`/`closing_card`)도 추가 —
-  본편 앞뒤로 붙고 BGM은 카드까지 안 끊고 이어진다. 이 장식 에셋들은 요청마다 만드는 게 아니라
-  `scripts/generate_christmas_assets.py`(개발 시점 1회 실행, Pillow+ffmpeg)가 미리 구워서 `assets/overlay/`에
-  올려두는 정적 파일이다 — BGM/폰트와 같은 취급. 진짜 디자인이 나오면 이 스크립트와 `christmas.json`의
-  관련 블록만 고치면 된다.
+  배경 PNG 경로를 넣으면 자막 번인 후·페이드 전에 합성된다(`video_composer.build_ffmpeg_command()`). `christmas.json`에
+  `assets/overlay/christmas_border_placeholder.png`(생성한 임시 테두리)가 걸려있고, `simple.json`은 없음 — 지우가 실제
+  디자인 주면 그 경로만 바꾸면 된다.
 - **TTS는 쓰지 않는다** (2026-11-02 결정, 이전 "TTS 사용" 결정을 뒤집음). 영상에는 음성 내레이션이 없고 자막과 BGM만 있다.
 - **BGM은 쓴다.** 콘셉트별 기본곡 1곡, 사용자 선택 기능 없음. 덕킹 대상(TTS)이 없으므로 덕킹도 없다.
 - **촬영 원본 소리는 모두 제거**한다(기존 코드의 "현장음 유지" 규칙은 폐기).

@@ -29,8 +29,7 @@ from .video_composer import compose_video, probe_duration
 @dataclass(frozen=True)
 class PipelineResult:
     output_path: Path
-    duration_sec: float  # actual final MP4 length, opening/closing cards included
-    thumbnail_at_sec: float = 0.3  # hook scene may not start at t=0 if an opening card ran first
+    duration_sec: float
 
 
 def run_pipeline(
@@ -114,6 +113,7 @@ def run_pipeline(
     canvas = render_cfg["canvas"]
     subtitle_cfg = render_cfg["subtitle"]
 
+    alternating_colors = subtitle_cfg.get("alternating_colors")
     subtitle_path = build_dir / f"{output_path.stem}.ass"
     write_ass(
         timings,
@@ -123,14 +123,11 @@ def run_pipeline(
         font_name=subtitle_cfg["font_name"],
         font_size=subtitle_cfg["font_size"],
         primary_color=subtitle_cfg["primary_color"],
-        outline_color=subtitle_cfg.get("outline_color", "&H00000000"),
         back_color=subtitle_cfg["back_color"],
         border_style=subtitle_cfg["border_style"],
         outline=subtitle_cfg["outline"],
-        bold=subtitle_cfg.get("bold", 0),
-        shadow=subtitle_cfg.get("shadow", 0),
         margin_v=subtitle_cfg["margin_v"],
-        pop_in=subtitle_cfg.get("pop_in", False),
+        alternating_colors=tuple(alternating_colors) if alternating_colors else None,
     )
 
     bgm_path = config.REPO_ROOT / template["audio"]["bgm"]
@@ -139,19 +136,6 @@ def run_pipeline(
     overlay_path = config.REPO_ROOT / overlay_cfg["image"] if overlay_cfg else None
     animated_overlay_cfg = render_cfg.get("animated_overlay")
     animated_overlay_path = config.REPO_ROOT / animated_overlay_cfg["video"] if animated_overlay_cfg else None
-    color_grade = render_cfg.get("color_grade")
-
-    opening_cfg = render_cfg.get("opening_card")
-    opening_card_path = opening_card_duration = None
-    if opening_cfg and opening_cfg.get("enabled"):
-        opening_card_path = config.REPO_ROOT / opening_cfg["video"]
-        opening_card_duration = opening_cfg["duration_sec"]
-
-    closing_cfg = render_cfg.get("closing_card")
-    closing_card_path = closing_card_duration = None
-    if closing_cfg and closing_cfg.get("enabled"):
-        closing_card_path = config.REPO_ROOT / closing_cfg["video"]
-        closing_card_duration = closing_cfg["duration_sec"]
 
     if on_stage:
         on_stage("composing")
@@ -169,11 +153,6 @@ def run_pipeline(
         transition_duration=transition_cfg["duration_sec"],
         overlay_path=overlay_path,
         animated_overlay_path=animated_overlay_path,
-        color_grade=color_grade,
-        opening_card_path=opening_card_path,
-        opening_card_duration=opening_card_duration or 0.0,
-        closing_card_path=closing_card_path,
-        closing_card_duration=closing_card_duration or 0.0,
         font_dir=config.FONT_DIR,
         width=canvas["width"],
         height=canvas["height"],
@@ -181,10 +160,7 @@ def run_pipeline(
         preset=render_cfg.get("ffmpeg_preset", config.FFMPEG_PRESET),
         deadline=deadline,
     )
-    main_duration = sum(d for _, d in scene_specs)
-    full_duration = main_duration + (opening_card_duration or 0.0) + (closing_card_duration or 0.0)
-    thumbnail_at_sec = (opening_card_duration or 0.0) + 0.3
-    return PipelineResult(output_path=output_path, duration_sec=full_duration, thumbnail_at_sec=thumbnail_at_sec)
+    return PipelineResult(output_path=output_path, duration_sec=sum(d for _, d in scene_specs))
 
 
 def main() -> None:
