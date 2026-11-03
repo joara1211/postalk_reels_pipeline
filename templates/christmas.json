@@ -67,7 +67,7 @@
       "_note": "simple.json과 달리 박스 없이 골드 글씨 + 검은 윤곽선만 쓴다(2026-11-02, 박스가 답답해 보인다는 피드백). back_color는 border_style=1(윤곽선 모드)에서는 안 쓰이지만 값 자체는 남겨뒀다 — 나중에 박스형으로 되돌릴 때 바로 쓸 수 있게. alternating_colors가 있으면 primary_color 대신 글자마다 이 두 색(BBGGRR hex, &H/& 없이)을 번갈아 쓴다(2026-11-03, 초록/빨강 두 가지 톤 요청) — [녹색 46AA00, 빨강 1E1EDC].",
       "font_name": "Griun Fromsol",
       "font_file": "assets/font/Griun_Fromsol-Rg.ttf",
-      "font_size": 64,
+      "font_size": 76,
       "primary_color": "&H006EBEE6",
       "back_color": "&H80161078",
       "border_style": 1,
