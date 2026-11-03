@@ -146,6 +146,33 @@ class TestBuildAss(unittest.TestCase):
         self.assertEqual(fields[15], "3")  # BorderStyle
         self.assertEqual(fields[16], "0")  # Outline
 
+    def test_alternating_colors_wraps_each_character_with_an_inline_color_tag(self):
+        from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
+
+        timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="가나다"), start=0.0, end=1.0)
+        ass = build_ass([timing], alternating_colors=("46AA00", "1E1EDC"))
+
+        dialogue_line = next(line for line in ass.splitlines() if line.startswith("Dialogue:"))
+        self.assertIn(r"{\c&H46AA00&}가{\c&H1E1EDC&}나{\c&H46AA00&}다", dialogue_line)
+
+    def test_alternating_colors_none_keeps_plain_text(self):
+        from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
+
+        timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="가나다"), start=0.0, end=1.0)
+        ass = build_ass([timing], alternating_colors=None)
+
+        self.assertIn(",,가나다", ass)
+        self.assertNotIn(r"\c&H", ass)
+
+    def test_alternating_colors_applied_after_brace_escaping(self):
+        from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
+
+        timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="a{b}c"), start=0.0, end=1.0)
+        ass = build_ass([timing], alternating_colors=("46AA00", "1E1EDC"))
+
+        self.assertNotIn("{b}", ass)
+        self.assertIn(r"{\c&H46AA00&}a{\c&H1E1EDC&}(", ass)
+
 
 if __name__ == "__main__":
     unittest.main()

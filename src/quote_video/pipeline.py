@@ -113,6 +113,7 @@ def run_pipeline(
     canvas = render_cfg["canvas"]
     subtitle_cfg = render_cfg["subtitle"]
 
+    alternating_colors = subtitle_cfg.get("alternating_colors")
     subtitle_path = build_dir / f"{output_path.stem}.ass"
     write_ass(
         timings,
@@ -126,6 +127,7 @@ def run_pipeline(
         border_style=subtitle_cfg["border_style"],
         outline=subtitle_cfg["outline"],
         margin_v=subtitle_cfg["margin_v"],
+        alternating_colors=tuple(alternating_colors) if alternating_colors else None,
     )
 
     bgm_path = config.REPO_ROOT / template["audio"]["bgm"]

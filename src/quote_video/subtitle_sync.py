@@ -121,6 +121,16 @@ def _escape_ass_text(text: str) -> str:
     return text.replace("{", "(").replace("}", ")")
 
 
+def _colorize_alternating(text: str, color_a: str, color_b: str) -> str:
+    """Wrap each character of an (already brace-escaped) caption line with
+    an ASS inline `\\c` override, alternating between `color_a`/`color_b`
+    (each a bare `BBGGRR` hex string, no `&H`/`&` — added here) — used for
+    a festive two-tone letter-by-letter look instead of one flat
+    PrimaryColour for the whole line. `\\c` only overrides the color, not
+    alpha, so it layers on top of the Style's own (opaque) alpha fine."""
+    return "".join(f"{{\\c&H{color_a if i % 2 == 0 else color_b}&}}{ch}" for i, ch in enumerate(text))
+
+
 def build_ass(
     timings: list[CaptionTiming],
     *,
@@ -133,6 +143,7 @@ def build_ass(
     border_style: int = 1,
     outline: int = 2,
     margin_v: int = 440,
+    alternating_colors: tuple[str, str] | None = None,
 ) -> str:
     """Render timed captions as a minimal .ass script with an explicit
     PlayResX/PlayResY matching the real output canvas.
@@ -171,9 +182,15 @@ def build_ass(
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
+    def _render_text(t: CaptionTiming) -> str:
+        escaped = _escape_ass_text(t.line.text)
+        if alternating_colors is None:
+            return escaped
+        return _colorize_alternating(escaped, *alternating_colors)
+
     events = "\n".join(
         f"Dialogue: 0,{_format_ass_timestamp(t.start)},{_format_ass_timestamp(t.end)},"
-        f"Default,,0,0,0,,{_escape_ass_text(t.line.text)}"
+        f"Default,,0,0,0,,{_render_text(t)}"
         for t in timings
     )
     return header + events + "\n"
