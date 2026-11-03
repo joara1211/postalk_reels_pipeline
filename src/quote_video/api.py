@@ -229,7 +229,7 @@ def _process_render(render_id: str, request: RenderRequest) -> None:
     job_store.send_callback(job_store.store.get_render(render_id))
 
     try:
-        generate_thumbnail(pipeline_result.output_path, thumbnail_path)
+        generate_thumbnail(pipeline_result.output_path, thumbnail_path, at_sec=pipeline_result.thumbnail_at_sec)
     except Exception:
         logger.exception("Thumbnail generation failed for render_id=%s (continuing without one)", render_id)
 

@@ -80,18 +80,64 @@ class TestRunPipelineDeadline(unittest.TestCase):
         kwargs = self.mock_compose.call_args.kwargs
         self.assertEqual(kwargs["transition_type"], "fade")
 
-    def test_christmas_concept_passes_its_overlay_image(self):
+    def test_christmas_concept_passes_its_animated_overlay(self):
+        # the christmas redesign (2026-11-03) folded garland/ornaments/
+        # lights/bokeh/snow into one animated_overlay loop; there's no
+        # separate static overlay.image anymore.
         christmas_request = RenderRequest(**{**self.request.__dict__, "concept": "christmas"})
         run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
         kwargs = self.mock_compose.call_args.kwargs
+        self.assertIsNone(kwargs["overlay_path"])
         self.assertEqual(
-            kwargs["overlay_path"], config.REPO_ROOT / "assets" / "overlay" / "christmas_border_placeholder.png"
+            kwargs["animated_overlay_path"], config.REPO_ROOT / "assets" / "overlay" / "christmas_scene.mkv"
         )
 
     def test_simple_concept_has_no_overlay(self):
         run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
         kwargs = self.mock_compose.call_args.kwargs
         self.assertIsNone(kwargs["overlay_path"])
+
+    def test_simple_concept_has_no_color_grade_or_cards(self):
+        run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertIsNone(kwargs["color_grade"])
+        self.assertIsNone(kwargs["opening_card_path"])
+        self.assertIsNone(kwargs["closing_card_path"])
+
+    def test_christmas_concept_passes_its_color_grade(self):
+        christmas_request = RenderRequest(**{**self.request.__dict__, "concept": "christmas"})
+        run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertIsNotNone(kwargs["color_grade"])
+        self.assertIn("saturation", kwargs["color_grade"])
+
+    def test_christmas_concept_passes_its_opening_and_closing_cards(self):
+        christmas_request = RenderRequest(**{**self.request.__dict__, "concept": "christmas"})
+        run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
+        kwargs = self.mock_compose.call_args.kwargs
+        self.assertEqual(
+            kwargs["opening_card_path"], config.REPO_ROOT / "assets" / "overlay" / "christmas_opening_card.mp4"
+        )
+        self.assertEqual(
+            kwargs["closing_card_path"], config.REPO_ROOT / "assets" / "overlay" / "christmas_closing_card.mp4"
+        )
+        self.assertEqual(kwargs["opening_card_duration"], 1.0)
+        self.assertEqual(kwargs["closing_card_duration"], 1.0)
+
+    def test_christmas_duration_sec_includes_card_durations(self):
+        christmas_request = RenderRequest(**{**self.request.__dict__, "concept": "christmas"})
+        result = run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
+        self.assertAlmostEqual(result.duration_sec, 15.0)  # 13s main + 1s open + 1s close
+
+    def test_christmas_thumbnail_at_sec_skips_the_opening_card(self):
+        christmas_request = RenderRequest(**{**self.request.__dict__, "concept": "christmas"})
+        result = run_pipeline(christmas_request, MEDIA_ROOT, Path("output/final.mp4"))
+        self.assertAlmostEqual(result.thumbnail_at_sec, 1.3)  # 1s opening card + 0.3
+
+    def test_simple_duration_sec_and_thumbnail_at_sec_are_unaffected(self):
+        result = run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
+        self.assertAlmostEqual(result.duration_sec, 13.0)
+        self.assertAlmostEqual(result.thumbnail_at_sec, 0.3)
 
     def test_accepts_a_plain_dict_request_too(self):
         import json

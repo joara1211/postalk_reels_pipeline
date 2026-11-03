@@ -264,6 +264,13 @@ class TestPostRendersProcessing(ApiTestCase):
         self.assertEqual(stages, ["preparing", "composing", "uploading"])
         self.assertEqual(snapshots[-1]["status"], "done")
 
+    def test_thumbnail_at_sec_passed_through_from_pipeline_result(self):
+        fake = PipelineResult(output_path=Path("fake_output.mp4"), duration_sec=15.0, thumbnail_at_sec=1.3)
+        with patch("src.quote_video.api.run_pipeline", return_value=fake):
+            with patch("src.quote_video.api.generate_thumbnail") as mock_thumb:
+                self.client.post("/reels/renders", json=_render_request())
+        self.assertEqual(mock_thumb.call_args.kwargs["at_sec"], 1.3)
+
     def test_thumbnail_failure_does_not_fail_the_render(self):
         fake = PipelineResult(output_path=Path("fake_output.mp4"), duration_sec=13.0)
         with patch("src.quote_video.api.run_pipeline", return_value=fake):

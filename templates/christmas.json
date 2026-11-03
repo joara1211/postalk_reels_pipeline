@@ -50,30 +50,53 @@
     "menu_block_sec": { "1": 9.0, "2": 10.0, "3": 11.0 }
   },
   "render": {
-    "_note": "디자인 미확정 임시값 — simple.json과 동일한 placeholder를 그대로 씀. 팀 디자인(컷 속도/전환/자막 스타일/색/폰트/BGM) 확정되면 이 블록만 고치면 된다 (코드 변경 없음). 장면 규칙(scene_rule)은 콘셉트 공통이라 simple.json과 동일.",
+    "_note": "2026-11-03 전면 재설계: 흩어진 스티커 테두리를 걷어내고 색보정+통일 팔레트(#B3001B/#0F4D2E/#F2C14E/#FFF6E5)+프레임형 장식(가랜드/전구/보케/3단 눈)+자막 재설계+오프닝/엔딩 카드로 바꿨다. 장식/카드 에셋은 scripts/generate_christmas_assets.py가 생성(개발 시점 1회 실행, 요청마다 생성 아님). 팀 최종 디자인이 나오면 이 블록과 그 스크립트만 고치면 된다. 장면 규칙(scene_rule)은 콘셉트 공통이라 simple.json과 동일.",
     "canvas": { "width": 1080, "height": 1920, "fps": 30 },
     "fade_sec": 0.5,
     "ffmpeg_preset": "veryfast",
     "transition": { "type": "fade", "duration_sec": 0.3 },
-    "overlay": {
-      "_note": "임시 플레이스홀더 — 지우(이미지 AI)가 실제 크리스마스 테두리/스티커 디자인을 주면 image 경로만 바꾸면 된다.",
-      "image": "assets/overlay/christmas_border_placeholder.png"
+    "color_grade": {
+      "_note": "실사 촬영분이 차갑고 어두워 보이는 것 보정 — 따뜻한 톤 + 채도 약간 업 + 비네팅. 카드(opening/closing)는 이미 팔레트에 맞춰 직접 그렸으므로 여기서 다시 보정하지 않는다(video_composer.build_ffmpeg_command() 참고).",
+      "saturation": 1.2,
+      "contrast": 1.08,
+      "brightness": 0.02,
+      "warm_rs": 0.08,
+      "warm_gs": 0.02,
+      "warm_bs": -0.08,
+      "warm_rm": 0.06,
+      "warm_bm": -0.06,
+      "vignette": "PI/4.5"
     },
     "animated_overlay": {
-      "_note": "눈 내리는 효과 — 정적 이미지로는 움직임을 못 내서 별도의 투명 루프 영상(3초/90프레임, 매끄럽게 반복)으로 만들었다. 실제 디자인이 나오면 video 경로만 교체하면 된다.",
-      "video": "assets/overlay/christmas_snow.mov"
+      "_note": "가랜드+오너먼트(흔들림)+전구(반짝임)+보케+3단 눈+하단 눈더미를 전부 담은 단일 루프 영상(3초/90프레임, FFV1 무손실 알파 — qtrle은 같은 내용에서 ~103MB로 git에 넣기엔 너무 커서 FFV1(~20MB)로 바꿨다). scripts/generate_christmas_assets.py:generate_scene_overlay(). 예전의 정적 테두리(render.overlay)는 이제 안 쓴다 — 전부 이 애니메이션 하나로 통합.",
+      "video": "assets/overlay/christmas_scene.mkv"
+    },
+    "opening_card": {
+      "_note": "그린 배경 + 골드 'Merry Christmas' 타이틀 + 눈/보케, 1초. scripts/generate_christmas_assets.py:generate_title_card().",
+      "enabled": true,
+      "video": "assets/overlay/christmas_opening_card.mp4",
+      "duration_sec": 1.0
+    },
+    "closing_card": {
+      "_note": "오프닝과 동일 톤의 엔딩 카드, 1초.",
+      "enabled": true,
+      "video": "assets/overlay/christmas_closing_card.mp4",
+      "duration_sec": 1.0
     },
     "subtitle": {
-      "_note": "simple.json과 달리 박스 없이 골드 글씨 + 검은 윤곽선만 쓴다(2026-11-02, 박스가 답답해 보인다는 피드백). back_color는 border_style=1(윤곽선 모드)에서는 안 쓰이지만 값 자체는 남겨뒀다 — 나중에 박스형으로 되돌릴 때 바로 쓸 수 있게. alternating_colors가 있으면 primary_color 대신 글자마다 이 두 색(BBGGRR hex, &H/& 없이)을 번갈아 쓴다(2026-11-03, 초록/빨강 두 가지 톤 요청) — [녹색 46AA00, 빨강 1E1EDC].",
+      "_note": "크림 글씨(#FFF6E5) + 레드 굵은 외곽선(#B3001B, outline=8) + 반투명 검정 그림자. 진짜 굵은 한글 폰트 파일이 레포에 없어서(Griun Fromsol 레귤러 하나뿐) bold=1(합성 볼드)+두꺼운 outline으로 '굵게' 흉내 — 나중에 진짜 굵은 폰트가 생기면 font_name/font_file만 바꾸면 됨(2026-11-03, 사용자 확인). margin_v=670 ≈ 화면 높이 65% 지점(요청한 60~70% 구간). pop_in=true로 등장 시 살짝 확대되는 팝 애니메이션.",
       "font_name": "Griun Fromsol",
       "font_file": "assets/font/Griun_Fromsol-Rg.ttf",
-      "font_size": 76,
-      "primary_color": "&H006EBEE6",
-      "back_color": "&H80161078",
+      "font_size": 88,
+      "primary_color": "&H00E5F6FF",
+      "outline_color": "&H001B00B3",
+      "back_color": "&H80000000",
       "border_style": 1,
-      "outline": 3,
-      "margin_v": 500,
-      "alternating_colors": ["46AA00", "1E1EDC"]
+      "outline": 8,
+      "bold": 1,
+      "shadow": 3,
+      "pop_in": true,
+      "margin_v": 670
     }
   }
 }

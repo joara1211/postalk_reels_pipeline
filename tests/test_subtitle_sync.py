@@ -146,32 +146,58 @@ class TestBuildAss(unittest.TestCase):
         self.assertEqual(fields[15], "3")  # BorderStyle
         self.assertEqual(fields[16], "0")  # Outline
 
-    def test_alternating_colors_wraps_each_character_with_an_inline_color_tag(self):
+    def test_outline_color_bold_and_shadow_land_in_the_style_line(self):
+        from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
+
+        timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="x"), start=0.0, end=1.0)
+        ass = build_ass([timing], outline_color="&H001B00B3", bold=1, shadow=3)
+
+        style_line = next(line for line in ass.splitlines() if line.startswith("Style: Default,"))
+        fields = style_line.split(",")
+        self.assertEqual(fields[5], "&H001B00B3")  # OutlineColour
+        self.assertEqual(fields[7], "1")  # Bold
+        self.assertEqual(fields[17], "3")  # Shadow
+
+    def test_defaults_match_pre_existing_hardcoded_style(self):
+        # backward compat: a caller that doesn't pass the new params should
+        # render byte-identical style fields to before they existed.
+        from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
+
+        timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="x"), start=0.0, end=1.0)
+        ass = build_ass([timing])
+
+        style_line = next(line for line in ass.splitlines() if line.startswith("Style: Default,"))
+        fields = style_line.split(",")
+        self.assertEqual(fields[5], "&H00000000")  # OutlineColour
+        self.assertEqual(fields[7], "0")  # Bold
+        self.assertEqual(fields[17], "0")  # Shadow
+
+    def test_pop_in_prefixes_each_dialogue_with_a_scale_transform_tag(self):
         from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
 
         timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="가나다"), start=0.0, end=1.0)
-        ass = build_ass([timing], alternating_colors=("46AA00", "1E1EDC"))
+        ass = build_ass([timing], pop_in=True)
 
         dialogue_line = next(line for line in ass.splitlines() if line.startswith("Dialogue:"))
-        self.assertIn(r"{\c&H46AA00&}가{\c&H1E1EDC&}나{\c&H46AA00&}다", dialogue_line)
+        self.assertIn(r"{\fscx80\fscy80\t(0,100,\fscx105\fscy105)\t(100,200,\fscx100\fscy100)}가나다", dialogue_line)
 
-    def test_alternating_colors_none_keeps_plain_text(self):
+    def test_pop_in_false_keeps_plain_text(self):
         from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
 
         timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="가나다"), start=0.0, end=1.0)
-        ass = build_ass([timing], alternating_colors=None)
+        ass = build_ass([timing], pop_in=False)
 
         self.assertIn(",,가나다", ass)
-        self.assertNotIn(r"\c&H", ass)
+        self.assertNotIn(r"\fscx", ass)
 
-    def test_alternating_colors_applied_after_brace_escaping(self):
+    def test_pop_in_tag_precedes_brace_escaped_text(self):
         from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
 
         timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="a{b}c"), start=0.0, end=1.0)
-        ass = build_ass([timing], alternating_colors=("46AA00", "1E1EDC"))
+        ass = build_ass([timing], pop_in=True)
 
         self.assertNotIn("{b}", ass)
-        self.assertIn(r"{\c&H46AA00&}a{\c&H1E1EDC&}(", ass)
+        self.assertIn(r"\t(100,200,\fscx100\fscy100)}a(b)c", ass)
 
 
 if __name__ == "__main__":
