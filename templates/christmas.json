@@ -72,7 +72,7 @@
       "back_color": "&H80161078",
       "border_style": 1,
       "outline": 3,
-      "margin_v": 500,
+      "margin_v": 560,
       "alternating_colors": ["46AA00", "1E1EDC"]
     }
   }
