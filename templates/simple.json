@@ -56,14 +56,15 @@
     "ffmpeg_preset": "veryfast",
     "transition": { "type": "fade", "duration_sec": 0.3 },
     "subtitle": {
+      "_note": "2026-11-07: christmas.json과 글자 크기/위치를 맞추고(font_size 64->76, margin_v 440->560), 박스 배경은 뺐다(border_style 3->1, 윤곽선만). back_color는 border_style=1에서는 안 쓰이지만 나중에 박스형으로 되돌릴 때 바로 쓸 수 있게 값은 남겨둠.",
       "font_name": "Griun Fromsol",
       "font_file": "assets/font/Griun_Fromsol-Rg.ttf",
-      "font_size": 64,
+      "font_size": 76,
       "primary_color": "&H00FFFFFF",
       "back_color": "&H80000000",
-      "border_style": 3,
+      "border_style": 1,
       "outline": 2,
-      "margin_v": 440
+      "margin_v": 560
     }
   }
 }
