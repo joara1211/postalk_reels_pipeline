@@ -57,6 +57,8 @@ Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백�
 
 자세한 필드와 오류 코드는 [릴스 API 명세](docs/reels-api-spec.md), Railway 연결 방식은 [배포 문서](docs/deployment.md)를 참고하세요.
 
+POSTALK 백엔드가 릴스 생성 요청을 만들고 결과를 저장하는 실제 연결 흐름은 [백엔드 연동 안내](docs/backend-integration.md)에 정리했습니다.
+
 ## 로컬 확인
 
 ```bash
