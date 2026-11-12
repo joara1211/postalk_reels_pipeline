@@ -60,6 +60,13 @@ class TestHealthzAndTemplates(ApiTestCase):
     def test_healthz(self):
         response = self.client.get("/healthz")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "status": "ok", "service": "postalk-reels", "mediaProvider": "supabase",
+        })
+
+    def test_media_defaults_to_supabase(self):
+        request = api.RenderRequestIn.model_validate(_render_request())
+        self.assertTrue(all(media.storage == "supabase" for media in request.media))
 
     def test_templates_lists_both_concepts_without_render_key(self):
         response = self.client.get("/reels/templates")

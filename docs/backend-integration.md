@@ -32,7 +32,7 @@
 | 항목 | 값 | 주의 사항 |
 | --- | --- | --- |
 | 내부 주소 | `http://postalk-reels.railway.internal:8000` | Railway 서비스 이름이 다르면 해당 이름으로 변경 |
-| 상태 확인 | `GET /healthz` | 인증 없음, `{ "status": "ok" }` 반환 |
+| 상태 확인 | `GET /healthz` | 인증 없음. 서비스 이름과 미디어 저장소를 포함한 상태 응답 반환 |
 | API 접두사 | `/reels` | `GET /healthz`를 제외하고 내부 키 필요 |
 | 인증 헤더 | `x-reels-api-key` | `REELS_INTERNAL_API_KEY` 값 전송 |
 
