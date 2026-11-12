@@ -49,7 +49,7 @@ def _now_iso() -> str:
 
 
 def _new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:6]}"
+    return f"{prefix}_{uuid.uuid4().hex}"
 
 
 @dataclass
@@ -122,7 +122,7 @@ class JobStore:
             for key, value in fields.items():
                 setattr(job, key, value)
 
-    def create_render_if_not_active(self, ad_id: str) -> tuple[RenderJob, bool]:
+    def create_render_if_not_active(self, ad_id: str, *, reuse_completed: bool = False) -> tuple[RenderJob, bool]:
         """Atomic check-and-create: if an active (queued/rendering) job
         already exists for `ad_id`, returns it with `created=False`
         instead of making a new one. Doing the "is one already running"
@@ -134,7 +134,7 @@ class JobStore:
         ALREADY_RENDERING과 기존 render_id를 돌려준다"."""
         with self._lock:
             for job in self._renders.values():
-                if job.ad_id == ad_id and job.status in ("queued", "rendering"):
+                if job.ad_id == ad_id and (job.status in ("queued", "rendering") or reuse_completed and job.status == "done"):
                     return job, False
             job = RenderJob(render_id=_new_id("rr"), ad_id=ad_id)
             self._renders[job.render_id] = job

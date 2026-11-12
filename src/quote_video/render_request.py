@@ -62,7 +62,7 @@ def build_render_plan(request: RenderRequest, template: dict) -> list[RenderScen
 
     media_by_index = {m["scene_index"]: m for m in request.media}
     actual_media_indices = sorted(media_by_index)
-    if actual_media_indices != expected_indices:
+    if len(request.media) != len(expected_indices) or actual_media_indices != expected_indices:
         raise SceneMismatchError(
             f"Expected scene_index {expected_indices} for {menu_count} menu(s) "
             f"in 'media', got {actual_media_indices}"
@@ -72,7 +72,7 @@ def build_render_plan(request: RenderRequest, template: dict) -> list[RenderScen
     text_by_index = {s["scene_index"]: s["text"] for s in request.scenes}
     if has_captions:
         actual_text_indices = sorted(text_by_index)
-        if actual_text_indices != expected_indices:
+        if len(request.scenes) != len(expected_indices) or actual_text_indices != expected_indices:
             raise SceneMismatchError(
                 f"Expected scene_index {expected_indices} for {menu_count} menu(s) "
                 f"in 'scenes', got {actual_text_indices}"

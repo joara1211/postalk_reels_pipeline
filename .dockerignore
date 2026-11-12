@@ -1,0 +1,10 @@
+.git
+.claude
+.env*
+__pycache__
+**/__pycache__
+output
+storage
+tests
+assets/videos
+assets/caption
