@@ -2,9 +2,8 @@
 Instagram caption, and hashtags, from store/menu info
 (docs/reels-api-spec.md section 3).
 
-The LLM provider isn't confirmed with the team yet (CLAUDE.md: "LLM 제공자
-(환경변수로 교체 가능하게)"), so the actual call goes through the `LlmClient`
-protocol. `generate_script()` takes one in; callers that don't pass one get
+The actual call goes through the `LlmClient` protocol. `generate_script()`
+takes one in; callers that don't pass one get
 `OpenAiLlmClient`, built lazily (only when actually needed) straight
 from `OPENAI_API_KEY`/`OPENAI_MODEL` env vars — so importing or unit-testing
 this module never needs an API key or network access, and swapping
@@ -185,8 +184,7 @@ def _parse_and_validate(raw: str, scene_plan: list[Scene], menus: list[dict]) ->
 def _fallback_result(store: dict, menus: list[dict], scene_plan: list[Scene]) -> ScriptResult:
     """Used when the LLM fails twice (bad/missing key, network error,
     invalid JSON, or output that fails validation): template default
-    phrasing filled in with the store/menu names, `is_fallback: true`
-    (CLAUDE.md "실패 대체")."""
+    phrasing filled in with the store/menu names, `is_fallback: true`."""
     scenes = []
     for scene in scene_plan:
         target = _target_for_scene(scene, menus)
@@ -228,8 +226,8 @@ def generate_script(
     *,
     llm_client: LlmClient | None = None,
 ) -> ScriptResult:
-    """CLAUDE.md: "LLM 실패: 1회 재시도 → 템플릿 기본 문구 + 가게명·메뉴명으로
-    채우고 is_fallback: true". Any failure along the way (missing API key,
+    """Retry the LLM once, then return template defaults with
+    `is_fallback: true`. Any failure along the way (missing API key,
     network error, malformed JSON, a scene over its char limit, too many
     hashtags, ...) counts as one failed attempt — this is deliberately a
     broad `except Exception`, since the fallback is meant to catch all of

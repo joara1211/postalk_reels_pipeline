@@ -284,7 +284,7 @@ def _render_to_storage(
             "caption": request.caption,
             "hashtags": request.hashtags,
             "render_ms": render_ms,
-            "fallbacks": [],  # per-scene media substitution isn't implemented yet (CLAUDE.md 실패 대체)
+            "fallbacks": [],  # 장면별 미디어 대체는 아직 구현하지 않음
         },
         error=None,
     )

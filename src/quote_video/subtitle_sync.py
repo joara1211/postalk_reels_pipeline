@@ -163,8 +163,7 @@ def build_ass(
     templates/<concept>.json's "render.subtitle" block (design isn't
     finalized yet, so it must stay editable there, not hardcoded here).
     `border_style=3` + a non-transparent `back_color` draws a solid caption
-    box instead of an outline, per CLAUDE.md's "자막은 우선 전부 ASS로
-    만든다(BorderStyle=3으로 박스형 가능)"."""
+    box instead of an outline."""
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
