@@ -10,8 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 이 레포 담당: **릴스 파이프라인(아라)**. 입력을 받아 MP4·썸네일·캡션을 내놓기까지가 범위다.
 - 범위 밖: 화면(준서, React PWA), Next.js API·Supabase 발급·인스타 게시(성준), 카드뉴스 이미지 AI(지우).
-- 실행 위치: AWS EC2의 Docker 기반 **FastAPI + FFmpeg** 서비스. Next.js 백엔드가 작업을 등록하고,
-  미디어 서버는 상태·결과를 콜백으로 돌려준다. 프론트는 이 서버를 직접 호출하지 않는다.
+- 실행 위치: **Railway**의 Docker 기반 **FastAPI + FFmpeg** 내부 서비스(공개 도메인 없음, `*.railway.internal` 주소).
+  POSTALK 백엔드가 `x-reels-api-key` 헤더로 작업을 등록하고 `GET /reels/renders/{id}`를 **조회**해서 결과를 가져간다
+  (콜백은 선택 기능, 현재 연동에선 안 씀). 프론트는 이 서버를 직접 호출하지 않는다.
+  배포·연동 절차는 `docs/backend-integration.md`, `docs/deployment.md`(백엔드 팀원 작성).
 
 **API 계약의 원본은 `docs/reels-api-spec.md`다.** 엔드포인트, 필드 이름, 상태 값, 오류 코드는 그 문서를 따른다.
 명세와 다르게 구현해야 할 이유가 생기면 코드를 먼저 바꾸지 말고 사용자에게 먼저 묻는다(프론트·백엔드가 이 명세에 맞춰 개발 중이다).
@@ -24,9 +26,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 [대본] POST /reels/scripts  (정보 입력 직후, 촬영 중 백그라운드)
    가게·메뉴 정보 → LLM(JSON 구조화 출력) → 장면별 자막 + 캡션·해시태그
 [생성] POST /reels/renders  (자막 확정 + 재료 업로드 후)
-   Supabase Storage 영상 다운로드 → 정규화(1080x1920, 30fps, 9:16 중앙 크롭, 원본 오디오 제거)
+   서명 URL로 Supabase Storage 영상을 임시 폴더에 다운로드 → 정규화(1080x1920, 30fps, 9:16 중앙 크롭, 원본 오디오 제거)
    → 장면 길이 맞춤 → ASS 자막 → 장면 합성 + 전환(xfade) + BGM
-   → MP4(H.264/AAC) + 썸네일 → Supabase Storage 업로드 → 콜백
+   → MP4(H.264/AAC) + 썸네일 → 서명 업로드 URL로 Supabase Storage에 PUT → 백엔드가 상태 조회로 확인
 ```
 
 ### 확정된 결정 (사용자와 합의됨, 임의로 바꾸지 말 것)
@@ -103,10 +105,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **(완료)** 콘셉트별 전환(xfade) — 자막 스타일 자체는 디자인 대기 중(JSON 값으로 교체 가능하게 되어 있음)
 - **(완료)** 썸네일(hook 장면에서 1080x1920 JPG) — 원본 훅 영상이 아니라 합성 끝난 최종 MP4 초반 프레임에서 뽑는다(`video_composer.generate_thumbnail()`), 이미 크롭된 상태라 추가 스케일링이 필요 없어서.
 - **(완료)** 진행 단계 보고: `preparing → composing → uploading` (TTS 없으므로 narrating 단계 자체가 없다), 한국어 label 포함.
-- **(완료, 로컬 가정)** 업로드/다운로드·콜백 전송 — Supabase Storage 대신 `STORAGE_ROOT` 환경변수가 가리키는 로컬 디렉터리를 버킷처럼 쓴다
-  (`media[].key`/`results/.../reel.mp4` 그대로 `STORAGE_ROOT / key`로 resolve). 콜백은 `NEXT_BASE_URL`이 설정된 경우에만 실제로 보내고,
-  안 보내면 조용히 스킵(로컬 개발용). 둘 다 "아직 팀과 확정 안 된 것" 참고.
-- **(완료)** 오류 코드: `CAPTION_TOO_LONG`, `SCENE_MISMATCH`, `ALREADY_RENDERING`, `NO_USABLE_MEDIA`, `RENDER_FAILED`, `TIMEOUT` 전부 구현.
+- **(완료, 백엔드 팀원 작업)** Supabase Storage 연동(`storage.py`) — 릴스 서비스는 Supabase 비밀 키 없이, 백엔드가 준
+  서명 URL(`media[].download_url`, `uploads.video_url`/`thumbnail_url`)로만 내려받고 올린다. `signed_object_key()`가
+  URL이 `SUPABASE_URL` 프로젝트의 `uploads` 버킷 서명 URL인지, `key`와 일치하는지, 결과가 `.../generated/<ad_id>.mp4|.jpg`인지 검사한다.
+  파일당 50MB 제한. 다운로드·업로드 오류는 서명 URL이 로그에 남지 않게 예외 종류만 로그하고 `RENDER_FAILED`로 처리.
+  `uploads`가 없는 요청은 **로컬 개발 전용**으로 예전처럼 `STORAGE_ROOT / key`를 읽고 쓴다(`SUPABASE_URL`이 설정돼 있으면 거절).
+- **(완료)** 서버 간 인증 — `/reels/*`는 `x-reels-api-key` 헤더 = `REELS_INTERNAL_API_KEY`(`api.require_internal_auth()`).
+  `SUPABASE_URL`도 키도 없으면 인증 생략(로컬), `SUPABASE_URL`만 있으면 503.
+- **(완료)** 콜백 전송 코드(`job_store.send_callback()`) — `NEXT_BASE_URL` 설정 시에만 보낸다. 현재 백엔드 연동은 조회 방식이라 안 씀.
+- **(완료)** 오류 코드: `CAPTION_TOO_LONG`, `SCENE_MISMATCH`, `ALREADY_RENDERING`, `NO_USABLE_MEDIA`, `RENDER_FAILED`, `TIMEOUT`,
+  `INVALID_CONCEPT`, `INVALID_MENU_COUNT`, `INVALID_AD_ID`, `INVALID_RENDER_INPUT`, `NOT_FOUND`.
+- **(완료)** `Dockerfile`(python:3.11-slim + ffmpeg + fonts-noto-cjk, 비루트 사용자), `.dockerignore`, `.env.example`.
 
 ## 작업 순서
 
@@ -117,26 +126,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **(완료)** LLM 대본 생성 (`script_generator.py`)
 4. **(완료)** FastAPI 래핑(명세의 4개 엔드포인트 + 콜백), 상태·진행 단계, 실패 대체 (`api.py`, `job_store.py`) —
    업로드/결과 저장은 Supabase Storage가 아니라 로컬 `STORAGE_ROOT`를 그 버킷처럼 흉내만 냄. 작업 상태도 프로세스 재시작하면 날아가는 인메모리 dict.
-5. **(다음)** Supabase Storage 연동(2026-11-02 결정: 백엔드가 Supabase Storage를 쓰기로 해서 S3 연동은 불필요해졌다 — 아래 참고),
-   Docker, 속도 측정(목표 30초) — `STORAGE_ROOT`를 실제 Supabase Storage 업로드/다운로드로, 인메모리 `JobStore`를 영속 저장소로 교체
+5. **(완료, 백엔드 팀원이 `Superkid0714/postalk_reels_pipeline`에서 작업 → 병합)** Supabase Storage 서명 URL 연동, 내부 인증,
+   Dockerfile, Railway 배포 문서.
+6. **(다음)** Railway 실배포 후 속도 측정(목표 30초), 장면 영상 대체(`fallbacks`) 구현, 필요하면 인메모리 `JobStore`를 영속 저장소로 교체
 
 각 단계마다 unittest를 추가한다. 기존 테스트 중 폐기된 규칙(2초 컷, 컷당 자막 2줄, 현장음)에 묶인 것은 지우지 말고 새 규칙에 맞게 고치거나, 지워야 하면 사용자에게 먼저 알린다.
 
-## 아직 팀과 확정 안 된 것 (가정으로 구현하되, 바꾸기 쉽게)
+## 팀과 맞출 것
 
-- 작업 등록 방식: Next.js → 미디어 서버 직접 호출 vs SQS — 지금 구현은 직접 호출(FastAPI 엔드포인트) 전제
-- 콜백 경로·서버 간 인증 방식 — 구현은 `POST {NEXT_BASE_URL}/api/internal/reels/callback` + 헤더 `X-Internal-Api-Key`로
-  가정하고 `job_store.send_callback()`에 이미 짜 놓았다. `NEXT_BASE_URL`/`REELS_CALLBACK_API_KEY` 환경변수로만 바뀐다 — 실제
-  경로·헤더 이름이 확정되면 그 함수 하나만 고치면 된다. `NEXT_BASE_URL` 미설정 시 콜백은 조용히 스킵(로컬 개발 지원용).
-- **S3는 안 쓴다 (2026-11-02 결정)** — 백엔드가 Supabase Storage를 쓰기로 해서 S3 연동 자체가 필요 없어졌다.
-  `docs/reels-api-spec.md`의 "파일은 S3 객체 키로 주고받는다"도 Supabase Storage 기준으로 고쳤다.
-- Supabase Storage 버킷 이름·경로 규칙 — 아직 미정. 지금 구현은 `uploads/{user_id}/{ad_id}/{scene_index}.mp4`,
-  `results/{user_id}/{ad_id}/reel.mp4|thumb.jpg` 가정대로 키(경로)를 만들지만, 실제 Supabase Storage가 아니라
-  `STORAGE_ROOT`(환경변수, 기본값 `./storage`) 밑 로컬 파일로 읽고 쓴다. `media[].storage` 필드는 받기만 하고 무시한다 —
-  Supabase Storage 연동(5단계)에서 `api.py`의 파일 읽기/쓰기 지점만 Supabase 클라이언트 호출로 바꾸면 된다.
-- 작업 상태 저장소 — 지금은 `job_store.JobStore`가 프로세스 메모리의 dict다. 재시작하면 모든 진행 중 작업이 사라지고,
-  워커를 여러 개 띄우면 서로 다른 메모리를 본다(단일 워커 가정). Docker/다중 워커로 갈 때(5·6단계) Supabase나 Redis 같은
-  공유 저장소로 바꿔야 한다.
+### 백엔드와 확정된 것 (2026-11 병합으로 확정)
+
+- 작업 등록: 백엔드 → 릴스 서비스 Railway 내부 주소 직접 호출(SQS 없음). 인증 헤더 `x-reels-api-key`.
+- 상태 전달: 백엔드가 `GET /reels/renders/{id}`로 조회. 콜백은 안 씀(코드는 남아 있고 `NEXT_BASE_URL` 설정 시에만 동작).
+- 스토리지: S3 아니고 Supabase Storage `uploads` 버킷, 서명 URL로만 주고받음. 결과 경로는 백엔드가 정함(`.../generated/<ad_id>.mp4|.jpg`).
+- 작업 상태 저장소: 인메모리 `JobStore` 그대로 두고, 재시작으로 잃은 작업은 백엔드가 같은 요청을 다시 등록한다.
+  `uploads` 있는 요청은 같은 `ad_id`가 이미 done이면 재렌더 없이 기존 결과를 돌려준다(`create_render_if_not_active(reuse_completed=True)`).
+  단일 프로세스 가정이므로 워커를 여러 개 띄우면 안 된다.
+
+### 아직 미정
+
+- 백엔드 연동은 현재 영상 4개(메뉴 1개) 기준으로 설명돼 있다. 메뉴 2·3개(영상 6·8개)를 백엔드가 보낼지 확인 필요(코드는 지원).
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
 - LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(표준 라이브러리 `urllib`만 사용, SDK 의존성 없음)가 기본값이지만 placeholder다.
   `LlmClient` 프로토콜만 맞추면 다른 제공자로 교체 가능(`generate_script(..., llm_client=...)`), `ANTHROPIC_API_KEY`/`LLM_MODEL` 환경변수로 키·모델 교체.
@@ -154,6 +163,11 @@ python -m uvicorn src.quote_video.api:app --reload
 python -m src.quote_video.pipeline --request tests/fixtures/render_request_1menu.json --media-root assets/videos --output output/reel.mp4
 ```
 
-개발 환경은 Windows(winget으로 설치한 FFmpeg), 배포는 Linux Docker다. 경로는 `pathlib`로 다루고 OS 의존 코드를 넣지 않는다.
-API 키(LLM, Supabase)는 `.env`로만 받고 커밋하지 않는다. 서버 환경변수: `STORAGE_ROOT`(기본 `./storage`), `NEXT_BASE_URL`·
-`REELS_CALLBACK_API_KEY`(콜백, 미설정 시 스킵), `ANTHROPIC_API_KEY`·`LLM_MODEL`(대본 생성).
+개발 환경은 Windows(winget으로 설치한 FFmpeg), 배포는 Railway의 Linux Docker다. 경로는 `pathlib`로 다루고 OS 의존 코드를 넣지 않는다.
+비밀값은 환경변수로만 받고 커밋하지 않는다(`.env`는 gitignore, 키 이름 목록은 `.env.example`). 코드는 `.env`를 자동으로 읽지 않으므로
+로컬에선 `uvicorn ... --env-file .env`, Docker에선 `--env-file`/Railway 변수로 넣는다. 서명 URL·내부 키는 로그·문서·PR에 남기지 않는다.
+
+서버 환경변수:
+- 운영 필수: `SUPABASE_URL`(서명 URL 검증용), `REELS_INTERNAL_API_KEY`(백엔드와 공유), `PORT`(기본 8000). Dockerfile은 앞의 두 개가 없으면 기동하지 않는다.
+- 선택: `ANTHROPIC_API_KEY`·`LLM_MODEL`(`/reels/scripts` 직접 쓸 때만, 현재 연동은 백엔드가 자막을 만들어 보냄),
+  `NEXT_BASE_URL`·`REELS_CALLBACK_API_KEY`(콜백, 미설정 시 스킵), `STORAGE_ROOT`(로컬 개발용, 기본 `./storage`).

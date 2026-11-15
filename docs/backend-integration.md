@@ -95,8 +95,8 @@
 | `400 INVALID_RENDER_INPUT` | 백엔드 렌더 요청 | 서명 URL·Storage 키·결과 경로 불일치 |
 | `400 SCENE_MISMATCH` 또는 `CAPTION_TOO_LONG` | 자막·장면 입력 | 템플릿 장면 규칙을 벗어난 요청 |
 | `409 ALREADY_RENDERING` | 동일 `ad_id`의 현재 작업 | 이미 큐 대기 또는 렌더링 중. 기존 `render_id` 조회 |
-| `failed / NO_USABLE_MEDIA` | 입력 영상과 서비스 로그 | 다운로드 실패 또는 사용할 수 있는 영상 없음 |
-| `failed / RENDER_FAILED` | 릴스 Railway 로그 | FFmpeg 합성 또는 Supabase 업로드 실패 |
+| `failed / NO_USABLE_MEDIA` | 입력 영상과 서비스 로그 | 내려받은 영상을 읽을 수 없음(사용할 수 있는 영상 없음) |
+| `failed / RENDER_FAILED` | 릴스 Railway 로그 | FFmpeg 합성, Supabase 원본 다운로드 또는 결과 업로드 실패 |
 
 오류를 공유할 때는 작업 ID와 오류 코드만 사용하고, 다운로드 URL·업로드 URL·내부 키를 포함하지 않는다.
 
