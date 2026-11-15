@@ -70,8 +70,8 @@
 | `REELS_INTERNAL_API_KEY` | 필요 | 필요 | 서버 간 인증용 공유 비밀 값 |
 | `REELS_API_URL` | 불필요 | 필요 | Railway 내부 릴스 서비스 주소 |
 | `PORT` | 필요 | 불필요 | 기본 예시 `8000` |
-| `ANTHROPIC_API_KEY` | 선택 | 불필요 | `/reels/scripts`에서 LLM 대본 생성 기능을 직접 사용할 때만 필요 |
-| `LLM_MODEL` | 선택 | 불필요 | 대본 생성에 사용할 모델 |
+| `OPENAI_API_KEY` | 선택 | 불필요 | `/reels/scripts`에서 AI 대본·캡션·해시태그 생성에 사용 |
+| `OPENAI_MODEL` | 선택 | 불필요 | 대본 생성에 사용할 OpenAI 모델 |
 
 실제 API 키, 서명 URL, 내부 주소의 인증 정보는 코드·문서·PR 본문·로그에 적지 않는다.
 

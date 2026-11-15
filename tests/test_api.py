@@ -113,7 +113,7 @@ class TestPostScripts(ApiTestCase):
         self.assertEqual(body["caption"], "해오름 떡집에서 창억떡을 만나보세요.")
 
     def test_without_api_key_falls_back_gracefully(self):
-        # no ANTHROPIC_API_KEY in this test environment -> generate_script's
+        # no OPENAI_API_KEY in this test environment -> generate_script's
         # own fallback kicks in; the endpoint should still report "done".
         with patch.dict("os.environ", {}, clear=True):
             post_response = self.client.post("/reels/scripts", json=_script_request())

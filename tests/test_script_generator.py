@@ -5,7 +5,7 @@ from unittest.mock import patch
 from src.quote_video import templates
 from src.quote_video.script_generator import (
     MAX_HASHTAGS,
-    AnthropicLlmClient,
+    OpenAiLlmClient,
     ScriptResult,
     _extract_price,
     generate_script,
@@ -205,26 +205,26 @@ class TestGenerateScriptRetryAndFallback(unittest.TestCase):
         self.assertLessEqual(len(result.hashtags), MAX_HASHTAGS)
 
 
-class TestAnthropicLlmClient(unittest.TestCase):
+class TestOpenAiLlmClient(unittest.TestCase):
     def test_missing_api_key_raises_without_any_network_call(self):
         with patch.dict("os.environ", {}, clear=True):
             with self.assertRaises(RuntimeError):
-                AnthropicLlmClient()
+                OpenAiLlmClient()
 
     def test_reads_api_key_and_model_from_env(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test", "LLM_MODEL": "claude-haiku-5-5"}):
-            client = AnthropicLlmClient()
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test", "OPENAI_MODEL": "gpt-4.1-mini"}):
+            client = OpenAiLlmClient()
         self.assertEqual(client.api_key, "sk-test")
-        self.assertEqual(client.model, "claude-haiku-5-5")
+        self.assertEqual(client.model, "gpt-4.1-mini")
 
     def test_explicit_args_override_env(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-env"}):
-            client = AnthropicLlmClient(api_key="sk-explicit", model="claude-opus-5-5")
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}):
+            client = OpenAiLlmClient(api_key="sk-explicit", model="gpt-4.1")
         self.assertEqual(client.api_key, "sk-explicit")
-        self.assertEqual(client.model, "claude-opus-5-5")
+        self.assertEqual(client.model, "gpt-4.1")
 
     def test_complete_builds_request_and_parses_text_blocks(self):
-        client = AnthropicLlmClient(api_key="sk-test")
+        client = OpenAiLlmClient(api_key="sk-test")
         captured = {}
 
         class FakeResponse:
@@ -235,7 +235,7 @@ class TestAnthropicLlmClient(unittest.TestCase):
                 return False
 
             def read(self):
-                return json.dumps({"content": [{"type": "text", "text": '{"ok": true}'}]}).encode("utf-8")
+                return json.dumps({"output_text": '{"ok": true}'}).encode("utf-8")
 
         def fake_urlopen(request, timeout):
             captured["url"] = request.full_url
@@ -248,11 +248,9 @@ class TestAnthropicLlmClient(unittest.TestCase):
             result = client.complete("system prompt", "user prompt")
 
         self.assertEqual(result, '{"ok": true}')
-        self.assertEqual(captured["url"], AnthropicLlmClient.API_URL)
-        self.assertEqual(captured["headers"]["x-api-key"], "sk-test")
-        self.assertEqual(captured["headers"]["anthropic-version"], AnthropicLlmClient.API_VERSION)
-        self.assertEqual(captured["body"]["system"], "system prompt")
-        self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "user prompt"}])
+        self.assertEqual(captured["url"], OpenAiLlmClient.API_URL)
+        self.assertEqual(captured["headers"]["authorization"], "Bearer sk-test")
+        self.assertEqual(captured["body"]["input"], "system prompt\n\nuser prompt")
 
 
 class TestExtractPrice(unittest.TestCase):

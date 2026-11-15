@@ -5,8 +5,8 @@ Instagram caption, and hashtags, from store/menu info
 The LLM provider isn't confirmed with the team yet (CLAUDE.md: "LLM 제공자
 (환경변수로 교체 가능하게)"), so the actual call goes through the `LlmClient`
 protocol. `generate_script()` takes one in; callers that don't pass one get
-`AnthropicLlmClient`, built lazily (only when actually needed) straight
-from `ANTHROPIC_API_KEY`/`LLM_MODEL` env vars — so importing or unit-testing
+`OpenAiLlmClient`, built lazily (only when actually needed) straight
+from `OPENAI_API_KEY`/`OPENAI_MODEL` env vars — so importing or unit-testing
 this module never needs an API key or network access, and swapping
 providers later is a new class, not a code change here.
 
@@ -40,30 +40,28 @@ class LlmClient(Protocol):
         ...
 
 
-class AnthropicLlmClient:
-    """Minimal stdlib-only client for Anthropic's Messages API — no SDK
-    dependency, since the provider itself isn't confirmed yet. Reads
-    ANTHROPIC_API_KEY (required) and LLM_MODEL (optional) from the
-    environment so it stays swappable without a code change."""
+class OpenAiLlmClient:
+    """Minimal stdlib-only client for OpenAI's Responses API.
 
-    DEFAULT_MODEL = "claude-sonnet-5-5"
-    API_URL = "https://api.anthropic.com/v1/messages"
-    API_VERSION = "2023-06-01"
+    The service uses the same provider and key format as the POSTALK backend,
+    but receives its own Railway environment variable. No SDK is required.
+    """
+
+    DEFAULT_MODEL = "gpt-4.1-mini"
+    API_URL = "https://api.openai.com/v1/responses"
 
     def __init__(self, *, api_key: str | None = None, model: str | None = None, timeout: float = 20.0):
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        self.model = model or os.environ.get("LLM_MODEL", self.DEFAULT_MODEL)
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.model = model or os.environ.get("OPENAI_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
         if not self.api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY is not set")
+            raise RuntimeError("OPENAI_API_KEY is not set")
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
         body = json.dumps(
             {
                 "model": self.model,
-                "max_tokens": 1024,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": user_prompt}],
+                "input": f"{system_prompt}\n\n{user_prompt}",
             }
         ).encode("utf-8")
         request = urllib.request.Request(
@@ -72,13 +70,15 @@ class AnthropicLlmClient:
             method="POST",
             headers={
                 "content-type": "application/json",
-                "x-api-key": self.api_key,
-                "anthropic-version": self.API_VERSION,
+                "authorization": f"Bearer {self.api_key}",
             },
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        return "".join(block["text"] for block in payload["content"] if block.get("type") == "text")
+        output_text = payload.get("output_text")
+        if not isinstance(output_text, str) or not output_text.strip():
+            raise ValueError("OpenAI response did not contain output_text")
+        return output_text
 
 
 @dataclass(frozen=True)
@@ -239,7 +239,7 @@ def generate_script(
 
     for _attempt in range(2):
         try:
-            client = llm_client or AnthropicLlmClient()
+            client = llm_client or OpenAiLlmClient()
             raw = client.complete(system_prompt, user_prompt)
             return _parse_and_validate(raw, scene_plan, menus)
         except Exception:
