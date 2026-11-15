@@ -7,7 +7,9 @@ from src.quote_video import templates
 from src.quote_video.script_generator import (
     MAX_HASHTAGS,
     AnthropicLlmClient,
+    GeminiLlmClient,
     ScriptResult,
+    default_llm_client,
     _build_prompt,
     _extract_price,
     generate_script,
@@ -292,6 +294,66 @@ class TestAnthropicLlmClient(unittest.TestCase):
             with patch.object(client._client.beta.messages, "create", lambda **_: response):
                 with self.assertRaises(RuntimeError):
                     client.complete("s", "u")
+
+
+class TestGeminiLlmClient(unittest.TestCase):
+    def test_missing_api_key_raises(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(RuntimeError):
+                GeminiLlmClient()
+
+    def test_reads_key_and_default_model(self):
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "g-test"}, clear=True):
+            client = GeminiLlmClient()
+        self.assertEqual(client.api_key, "g-test")
+        self.assertEqual(client.model, GeminiLlmClient.DEFAULT_MODEL)
+
+    def test_complete_sends_system_prompt_and_json_schema(self):
+        client = GeminiLlmClient(api_key="g-test")
+        captured = {}
+
+        def fake_generate(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(text='{"ok": true}', candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="STOP"))])
+
+        with patch.object(client._client.models, "generate_content", fake_generate):
+            result = client.complete("system prompt", "user prompt", schema={"type": "object"})
+
+        self.assertEqual(result, '{"ok": true}')
+        self.assertEqual(captured["contents"], "user prompt")
+        self.assertEqual(captured["config"].system_instruction, "system prompt")
+        self.assertEqual(captured["config"].response_mime_type, "application/json")
+        self.assertEqual(captured["config"].response_json_schema, {"type": "object"})
+
+    def test_truncated_or_blocked_response_raises(self):
+        client = GeminiLlmClient(api_key="g-test")
+        response = SimpleNamespace(text="", candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="MAX_TOKENS"))])
+        with patch.object(client._client.models, "generate_content", lambda **_: response):
+            with self.assertRaises(RuntimeError):
+                client.complete("s", "u")
+
+
+class TestDefaultLlmClient(unittest.TestCase):
+    def test_gemini_when_only_gemini_key_is_set(self):
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "g"}, clear=True):
+            self.assertIsInstance(default_llm_client(), GeminiLlmClient)
+
+    def test_anthropic_when_anthropic_key_is_set(self):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g"}, clear=True):
+            self.assertIsInstance(default_llm_client(), AnthropicLlmClient)
+
+    def test_llm_provider_overrides_key_detection(self):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g", "LLM_PROVIDER": "gemini"}, clear=True):
+            self.assertIsInstance(default_llm_client(), GeminiLlmClient)
+
+    def test_generate_script_uses_gemini_from_env(self):
+        template = templates.load_template("simple")
+        scene_plan = templates.build_scene_plan(template, menu_count=1)
+        fake = FakeLlmClient([_valid_response(scene_plan, ["a", "b", "c", "d"])])
+        with patch("src.quote_video.script_generator.default_llm_client", return_value=fake):
+            result = generate_script(STORE, MENUS_1, template)
+        self.assertFalse(result.is_fallback)
+        self.assertEqual(len(fake.calls), 1)
 
 
 class TestPrompt(unittest.TestCase):

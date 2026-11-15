@@ -6,7 +6,9 @@ section 3).
 
 The LLM call goes through the `LlmClient` protocol so the provider stays
 swappable and tests never touch the network. Callers that don't pass one get
-`AnthropicLlmClient`, built lazily from `ANTHROPIC_API_KEY`/`LLM_MODEL`.
+`default_llm_client()`: Claude (`AnthropicLlmClient`, ANTHROPIC_API_KEY) or
+Gemini (`GeminiLlmClient`, GEMINI_API_KEY), chosen by LLM_PROVIDER or by
+which key is set.
 
 How a result is assembled, most-preferred first:
 1. The LLM's caption for every scene, cleaned up (emoji/unsupported symbols
@@ -89,6 +91,59 @@ class AnthropicLlmClient:
         if response.stop_reason in ("refusal", "max_tokens"):
             raise RuntimeError(f"LLM stopped early: {response.stop_reason}")
         return "".join(block.text for block in response.content if block.type == "text")
+
+
+class GeminiLlmClient:
+    """Google Gemini via the official `google-genai` SDK, with JSON-schema
+    structured output. Reads GEMINI_API_KEY (or GOOGLE_API_KEY) and
+    LLM_MODEL from the environment."""
+
+    DEFAULT_MODEL = "gemini-2.5-flash"
+
+    def __init__(self, *, api_key: str | None = None, model: str | None = None, timeout: float = 60.0):
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        self.model = model or os.environ.get("LLM_MODEL") or self.DEFAULT_MODEL
+        self.timeout = timeout
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        from google import genai  # imported here so the module loads without the SDK installed
+        from google.genai import types
+
+        self._types = types
+        self._client = genai.Client(
+            api_key=self.api_key, http_options=types.HttpOptions(timeout=int(timeout * 1000))
+        )
+
+    def complete(self, system_prompt: str, user_prompt: str, *, schema: dict | None = None) -> str:
+        config = {"system_instruction": system_prompt}
+        if schema is not None:
+            config["response_mime_type"] = "application/json"
+            config["response_json_schema"] = schema
+        response = self._client.models.generate_content(
+            model=self.model,
+            contents=user_prompt,
+            config=self._types.GenerateContentConfig(**config),
+        )
+        candidates = response.candidates or []
+        finish = getattr(candidates[0], "finish_reason", None) if candidates else None
+        if not candidates or (finish is not None and str(getattr(finish, "name", finish)) not in ("STOP", "FINISH_REASON_UNSPECIFIED")):
+            raise RuntimeError(f"LLM stopped early: {finish}")
+        return response.text or ""
+
+
+def default_llm_client() -> LlmClient:
+    """Pick the provider from the environment: LLM_PROVIDER ("anthropic" |
+    "gemini") wins; otherwise Gemini when only GEMINI_API_KEY/GOOGLE_API_KEY
+    is set, Anthropic in every other case."""
+    provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
+    if not provider:
+        has_gemini = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+        provider = "gemini" if has_gemini and not os.environ.get("ANTHROPIC_API_KEY") else "anthropic"
+    if provider == "gemini":
+        return GeminiLlmClient()
+    if provider == "anthropic":
+        return AnthropicLlmClient()
+    raise RuntimeError(f"Unknown LLM_PROVIDER: {provider}")
 
 
 @dataclass(frozen=True)
@@ -404,13 +459,13 @@ def generate_script(
     note = ""
     for attempt in range(2):
         try:
-            client = llm_client or AnthropicLlmClient()
+            client = llm_client or default_llm_client()
             raw = client.complete(system_prompt, user_prompt + note, schema=schema)
             draft = _parse(raw, scene_plan)
         except Exception as error:
             logger.warning("Script LLM attempt %d failed: %s", attempt + 1, type(error).__name__)
-            if isinstance(error, RuntimeError) and "ANTHROPIC_API_KEY" in str(error):
-                break  # no key — a second try can't succeed
+            if isinstance(error, RuntimeError) and ("API_KEY" in str(error) or "LLM_PROVIDER" in str(error)):
+                break  # misconfigured — a second try can't succeed
             continue
 
         overflow = _overflow(draft, scene_plan)

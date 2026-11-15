@@ -148,8 +148,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 백엔드 연동은 현재 영상 4개(메뉴 1개) 기준으로 설명돼 있다. 메뉴 2·3개(영상 6·8개)를 백엔드가 보낼지 확인 필요(코드는 지원).
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
 - LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(공식 `anthropic` SDK, 기본 모델 `claude-opus-5-5`, effort `medium`,
-  구조화 출력(JSON 스키마) + 서버측 거절 대체(`fallbacks: "default"`))가 기본값. `LlmClient` 프로토콜만 맞추면 다른 제공자로 교체 가능
-  (`generate_script(..., llm_client=...)`), `ANTHROPIC_API_KEY`/`LLM_MODEL` 환경변수로 키·모델 교체.
+  구조화 출력(JSON 스키마) + 서버측 거절 대체(`fallbacks: "default"`))와 `GeminiLlmClient`(공식 `google-genai` SDK,
+  기본 모델 `gemini-2.5-flash`, JSON 스키마 출력) 두 가지. `default_llm_client()`가 고른다: `LLM_PROVIDER`(`anthropic`|`gemini`)가
+  있으면 그걸, 없으면 `GEMINI_API_KEY`만 있을 때 Gemini, 그 외엔 Claude. `LLM_MODEL`로 모델 교체.
+  `LlmClient` 프로토콜만 맞추면 다른 제공자도 추가 가능(`generate_script(..., llm_client=...)`).
 
 ### 자막(대본) 생성 규칙 (2026-11-15 개편)
 
@@ -163,7 +165,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 명령어
 ```bash
-pip install -r requirements.txt           # fastapi, pydantic, uvicorn, httpx, anthropic
+pip install -r requirements.txt           # fastapi, pydantic, uvicorn, httpx, anthropic, google-genai
 python -m unittest discover -s tests -v    # 테스트 (stdlib unittest + FastAPI TestClient)
 
 # FastAPI 서버 (docs/reels-api-spec.md의 4개 엔드포인트 + /healthz)
@@ -179,5 +181,5 @@ python -m src.quote_video.pipeline --request tests/fixtures/render_request_1menu
 
 서버 환경변수:
 - 운영 필수: `SUPABASE_URL`(서명 URL 검증용), `REELS_INTERNAL_API_KEY`(백엔드와 공유), `PORT`(기본 8000). Dockerfile은 앞의 두 개가 없으면 기동하지 않는다.
-- 선택: `ANTHROPIC_API_KEY`·`LLM_MODEL`(`/reels/scripts` 직접 쓸 때만, 현재 연동은 백엔드가 자막을 만들어 보냄),
+- 선택: `ANTHROPIC_API_KEY` 또는 `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`(`/reels/scripts` 직접 쓸 때만, 현재 연동은 백엔드가 자막을 만들어 보냄),
   `NEXT_BASE_URL`·`REELS_CALLBACK_API_KEY`(콜백, 미설정 시 스킵), `STORAGE_ROOT`(로컬 개발용, 기본 `./storage`).
