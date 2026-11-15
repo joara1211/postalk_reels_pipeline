@@ -123,6 +123,23 @@ class TestGenerateScriptRetryAndFallback(unittest.TestCase):
         result = generate_script(STORE, MENUS_1, self.template, llm_client=client)
 
         self.assertTrue(result.is_fallback)
+
+    def test_empty_hashtags_fall_back_instead_of_returning_an_unpublishable_script(self):
+        bad = json.dumps({
+            "scenes": [
+                {"scene_index": 0, "text": "해오름 떡집"},
+                {"scene_index": 1, "text": "창억떡"},
+                {"scene_index": 2, "text": "쫀득한 창억떡"},
+                {"scene_index": 3, "text": "지금 들러보세요"},
+            ],
+            "caption": "창억떡을 만나보세요.",
+            "hashtags": [],
+        })
+        client = FakeLlmClient([bad, bad])
+        result = generate_script(STORE, MENUS_1, self.template, llm_client=client)
+        self.assertTrue(result.is_fallback)
+        self.assertGreater(len(result.hashtags), 0)
+        self.assertTrue(all(tag.startswith("#") and " " not in tag for tag in result.hashtags))
         self.assertEqual(len(client.calls), 2)
 
     def test_network_error_both_attempts_falls_back(self):

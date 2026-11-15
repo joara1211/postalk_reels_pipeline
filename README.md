@@ -11,10 +11,10 @@ POSTALK 백엔드가 전달한 영상 4개를 세로형 릴스로 합성하는 �
 | `PORT` | FastAPI 포트. 기본 예시는 `8000` |
 | `SUPABASE_URL` | 서명 URL의 프로젝트 검증에 사용 |
 | `REELS_INTERNAL_API_KEY` | 백엔드와 공유하는 내부 호출 키 |
-| `ANTHROPIC_API_KEY` | 이 서비스에서 대본 API를 직접 사용할 때만 필요 |
+| `ANTHROPIC_API_KEY` | AI가 장면 자막·게시글 캡션·해시태그를 생성할 때 필요 |
 | `LLM_MODEL` | 선택한 대본 생성 모델 |
 
-Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백엔드의 `REELS_API_URL`은 `http://<service>.railway.internal:8000` 형식이며, 두 서비스의 `REELS_INTERNAL_API_KEY` 값은 같아야 합니다.
+Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백엔드의 `REELS_API_URL`은 `http://<service>.railway.internal:8000` 형식이며, 두 서비스의 `REELS_INTERNAL_API_KEY` 값은 같아야 합니다. `ANTHROPIC_API_KEY`가 없거나 AI 응답이 형식에 맞지 않으면, 서비스는 빈 해시태그를 반환하지 않고 기본 캡션·해시태그로 안전하게 대체합니다.
 
 ## 내부 API
 

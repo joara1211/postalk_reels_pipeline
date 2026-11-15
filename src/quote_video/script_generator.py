@@ -171,11 +171,12 @@ def _parse_and_validate(raw: str, scene_plan: list[Scene], menus: list[dict]) ->
         )
 
     caption = str(data["caption"]).strip()
-    if len(caption) > MAX_CAPTION_CHARS:
+    if not caption or len(caption) > MAX_CAPTION_CHARS:
         raise ValueError(f"caption {len(caption)} chars exceeds max {MAX_CAPTION_CHARS}")
 
-    hashtags = [str(tag) for tag in data["hashtags"]]
-    if len(hashtags) > MAX_HASHTAGS:
+    hashtags = [str(tag).strip() for tag in data["hashtags"]]
+    if (not hashtags or len(hashtags) > MAX_HASHTAGS or
+            any(not tag.startswith("#") or len(tag) == 1 or any(char.isspace() for char in tag) for tag in hashtags)):
         raise ValueError(f"{len(hashtags)} hashtags exceeds max {MAX_HASHTAGS}")
 
     return ScriptResult(scenes=scenes, caption=caption, hashtags=hashtags, is_fallback=False)
@@ -211,7 +212,12 @@ def _fallback_result(store: dict, menus: list[dict], scene_plan: list[Scene]) ->
 
     menu_names = [menu["name"] for menu in menus]
     caption = f"{store['name']}에서 {', '.join(menu_names)}을 만나보세요."[:MAX_CAPTION_CHARS]
-    hashtags = ([f"#{store['name']}"] + [f"#{name}" for name in menu_names])[:MAX_HASHTAGS]
+    def hashtag(value: str) -> str:
+        # 공백이나 기호가 있는 상호·메뉴명도 하나의 검색 가능한 태그로 만든다.
+        normalized = re.sub(r"[^\w가-힣]", "", value)
+        return f"#{normalized}" if normalized else "#전통시장"
+
+    hashtags = list(dict.fromkeys([hashtag(store["name"])] + [hashtag(name) for name in menu_names]))[:MAX_HASHTAGS]
     return ScriptResult(scenes=scenes, caption=caption, hashtags=hashtags, is_fallback=True)
 
 
