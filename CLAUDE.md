@@ -147,13 +147,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 백엔드 연동은 현재 영상 4개(메뉴 1개) 기준으로 설명돼 있다. 메뉴 2·3개(영상 6·8개)를 백엔드가 보낼지 확인 필요(코드는 지원).
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
-- LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(표준 라이브러리 `urllib`만 사용, SDK 의존성 없음)가 기본값이지만 placeholder다.
-  `LlmClient` 프로토콜만 맞추면 다른 제공자로 교체 가능(`generate_script(..., llm_client=...)`), `ANTHROPIC_API_KEY`/`LLM_MODEL` 환경변수로 키·모델 교체.
+- LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(공식 `anthropic` SDK, 기본 모델 `claude-opus-5-5`, effort `medium`,
+  구조화 출력(JSON 스키마) + 서버측 거절 대체(`fallbacks: "default"`))가 기본값. `LlmClient` 프로토콜만 맞추면 다른 제공자로 교체 가능
+  (`generate_script(..., llm_client=...)`), `ANTHROPIC_API_KEY`/`LLM_MODEL` 환경변수로 키·모델 교체.
+
+### 자막(대본) 생성 규칙 (2026-11-15 개편)
+
+- 입력은 화면 "무엇을 알릴까요?" 그대로: 가게 이름, 가게 설명("어떤 가게인가요?"), 메뉴 1~3개(이름 + 자유 설명, 설명은 비어 있을 수 있음).
+- 자막은 공백 포함 `caption_max_chars` 이하. 넘친 장면이 있으면 **어느 장면이 몇 자 넘었는지 알려주고 1회 재요청**,
+  그래도 넘치면 **그 장면만** 사용자 입력 기반 기본 문구로 바꾼다(`is_fallback`은 false 유지). 전체 기본 문구(`is_fallback: true`)는
+  LLM 결과가 아예 없을 때만(키 없음, 네트워크 오류, JSON 2회 실패).
+- 자막에서 이모지·특수기호는 제거한다(자막 폰트에 글리프가 없어 빈 네모로 나옴). 해시태그는 `#` + 띄어쓰기 없음, 중복 제거, 30개 이하.
+- 기본 문구: hook=가게명, closeup=메뉴명, detail=메뉴명+가격 → 가격 → 설명 첫 구절, outro=`{가게명}에서 만나요`. 캡션은 가게·메뉴 설명으로 구성.
 - 심플·크리스마스 콘셉트의 디자인 전체
 
 ## 명령어
 ```bash
-pip install -r requirements.txt           # fastapi, pydantic, uvicorn, httpx (stdlib 외 첫 의존성, 4단계부터)
+pip install -r requirements.txt           # fastapi, pydantic, uvicorn, httpx, anthropic
 python -m unittest discover -s tests -v    # 테스트 (stdlib unittest + FastAPI TestClient)
 
 # FastAPI 서버 (docs/reels-api-spec.md의 4개 엔드포인트 + /healthz)
