@@ -6,6 +6,7 @@ POSTALK 백엔드와 같은 Railway 프로젝트 및 환경에 이 저장소를 
 | --- | --- |
 | `SUPABASE_URL` | POSTALK 백엔드와 같은 Supabase 프로젝트의 HTTPS URL |
 | `REELS_INTERNAL_API_KEY` | POSTALK 백엔드와 공유하는 비밀 값 |
+| `OPENAI_API_KEY` | 백엔드 서비스의 같은 이름 변수를 Railway 참조로 연결. AI 자막·캡션·해시태그 생성에 사용 |
 | `PORT` | 백엔드 내부 URL에 넣을 서비스 포트. 예시는 `8000` |
 
 POSTALK 백엔드에는 `REELS_API_URL=http://<릴스 서비스 이름>.railway.internal:8000`과 같은 `REELS_INTERNAL_API_KEY`를 설정합니다. 릴스 서비스가 호출하는 Supabase URL은 작업에 필요한 다운로드 및 업로드 URL로 한정됩니다. Supabase 서비스 역할 키는 백엔드에서 관리합니다.
