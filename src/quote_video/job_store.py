@@ -1,12 +1,10 @@
 """In-memory job state for POST /reels/scripts and POST /reels/renders,
 plus the status callback to Next.js.
 
-Everything here is a stand-in for pieces the team hasn't confirmed yet
-(CLAUDE.md "아직 팀과 확정 안 된 것"): a real job store would be Supabase/a
-queue instead of a process-local dict (lost on restart, not shared across
-workers), and the callback's base URL/auth header are assumed, not
-confirmed. Kept in one module, behind a small interface, so swapping
-either out later doesn't touch api.py's route handlers.
+The process-local dict is not shared across workers and is lost on restart.
+The callback base URL and authentication header are configured separately.
+Both concerns are isolated in this module so a persistent store or callback
+contract change does not affect api.py route handlers.
 """
 
 from __future__ import annotations
@@ -160,9 +158,8 @@ def send_callback(render_job: RenderJob) -> None:
     current status (docs/reels-api-spec.md section 5: "미디어 서버는 status나
     stage가 바뀔 때마다 ... 전달한다").
 
-    NEXT_BASE_URL and the auth header are both unconfirmed with the team
-    (CLAUDE.md) — header name assumed as X-Internal-Api-Key, read from
-    REELS_CALLBACK_API_KEY. If NEXT_BASE_URL isn't set, the callback is
+    The callback uses X-Internal-Api-Key from REELS_CALLBACK_API_KEY. If
+    NEXT_BASE_URL isn't set, the callback is
     just skipped (so this runs fine in local dev with no Next.js around).
     A failed callback is logged, never raised — the spec itself says
     Next.js falls back to polling GET /reels/renders/{render_id} when the

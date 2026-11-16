@@ -118,9 +118,8 @@ def rebalance_menu_scene_durations(
     instead of always splitting it equally — a scene filmed long gets more
     screen time, one filmed short gets less (2026-11-02 decision).
 
-    hook/outro scenes (`menu_index is None`) are left untouched: CLAUDE.md
-    fixes those at exactly 2s each as a separate rule from the per-menu
-    split, not something this flexes.
+    hook/outro scenes (`menu_index is None`) are left untouched: each is
+    fixed at 2s independently from the per-menu split.
 
     Each menu's own total (the sum of its own scenes' durations, from
     `build_scene_plan()`'s equal split) is preserved exactly — this only

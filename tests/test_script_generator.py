@@ -8,6 +8,7 @@ from src.quote_video.script_generator import (
     MAX_HASHTAGS,
     AnthropicLlmClient,
     GeminiLlmClient,
+    OpenAiLlmClient,
     ScriptResult,
     default_llm_client,
     _build_prompt,
@@ -177,6 +178,14 @@ class TestGenerateScriptRetryAndFallback(unittest.TestCase):
 
         self.assertEqual(result.hashtags, ["#창억떡", "#동네맛집", "#떡집"])
 
+    def test_empty_hashtags_are_filled_with_defaults(self):
+        scene_plan = templates.build_scene_plan(self.template, menu_count=1)
+        raw = json.loads(_valid_response(scene_plan, ["해오름 떡집", "창억떡", "쫀득한 창억떡", "지금 들러보세요"]))
+        raw["hashtags"] = []
+        result = generate_script(STORE, MENUS_1, self.template, llm_client=FakeLlmClient([json.dumps(raw)]))
+        self.assertGreater(len(result.hashtags), 0)
+        self.assertTrue(all(tag.startswith("#") and " " not in tag for tag in result.hashtags))
+
     def test_scene_index_mismatch_falls_back(self):
         bad = json.dumps({"scenes": [{"scene_index": 0, "text": "a"}], "caption": "c", "hashtags": []})
         client = FakeLlmClient([bad, bad])
@@ -333,7 +342,87 @@ class TestGeminiLlmClient(unittest.TestCase):
                 client.complete("s", "u")
 
 
+class _FakeHttpResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps(self._payload).encode("utf-8")
+
+
+class TestOpenAiLlmClient(unittest.TestCase):
+    def test_missing_api_key_raises_without_any_network_call(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(RuntimeError):
+                OpenAiLlmClient()
+
+    def test_reads_key_and_model_from_env(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test", "OPENAI_MODEL": "gpt-4.1"}, clear=True):
+            client = OpenAiLlmClient()
+        self.assertEqual(client.api_key, "sk-test")
+        self.assertEqual(client.model, "gpt-4.1")
+
+    def test_default_model_when_env_unset(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            self.assertEqual(OpenAiLlmClient().model, OpenAiLlmClient.DEFAULT_MODEL)
+
+    def test_complete_sends_strict_schema_and_reads_output_items(self):
+        client = OpenAiLlmClient(api_key="sk-test")
+        captured = {}
+        payload = {
+            "status": "completed",
+            "output": [
+                {"type": "reasoning", "summary": []},
+                {"type": "message", "content": [{"type": "output_text", "text": '{"ok": true}'}]},
+            ],
+        }
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["headers"] = {k.lower(): v for k, v in request.header_items()}
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return _FakeHttpResponse(payload)
+
+        schema = {"type": "object"}
+        with patch("urllib.request.urlopen", fake_urlopen):
+            result = client.complete("system prompt", "user prompt", schema=schema)
+
+        self.assertEqual(result, '{"ok": true}')
+        self.assertEqual(captured["url"], OpenAiLlmClient.API_URL)
+        self.assertEqual(captured["headers"]["authorization"], "Bearer sk-test")
+        self.assertEqual(captured["body"]["instructions"], "system prompt")
+        self.assertEqual(captured["body"]["input"], "user prompt")
+        fmt = captured["body"]["text"]["format"]
+        self.assertEqual((fmt["type"], fmt["strict"], fmt["schema"]), ("json_schema", True, schema))
+
+    def test_incomplete_or_refused_or_empty_response_raises(self):
+        client = OpenAiLlmClient(api_key="sk-test")
+        bad_payloads = [
+            {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}, "output": []},
+            {"status": "completed", "output": [{"type": "message", "content": [{"type": "refusal", "refusal": "no"}]}]},
+            {"status": "completed", "output": []},
+        ]
+        for payload in bad_payloads:
+            with patch("urllib.request.urlopen", lambda request, timeout, p=payload: _FakeHttpResponse(p)):
+                with self.assertRaises(RuntimeError):
+                    client.complete("s", "u")
+
+
 class TestDefaultLlmClient(unittest.TestCase):
+    def test_openai_when_openai_key_is_set(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "o", "ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g"}, clear=True):
+            self.assertIsInstance(default_llm_client(), OpenAiLlmClient)
+
+    def test_unknown_provider_raises(self):
+        with patch.dict("os.environ", {"LLM_PROVIDER": "nope"}, clear=True):
+            with self.assertRaises(RuntimeError):
+                default_llm_client()
     def test_gemini_when_only_gemini_key_is_set(self):
         with patch.dict("os.environ", {"GEMINI_API_KEY": "g"}, clear=True):
             self.assertIsInstance(default_llm_client(), GeminiLlmClient)

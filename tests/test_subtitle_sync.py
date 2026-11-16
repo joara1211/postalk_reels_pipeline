@@ -126,7 +126,7 @@ class TestBuildAss(unittest.TestCase):
     def test_box_style_params_from_template_land_in_the_style_line(self):
         # templates/<concept>.json's render.subtitle block drives these —
         # BorderStyle=3 + an opaque-ish BackColour draws a solid box
-        # instead of a text outline (CLAUDE.md: "BorderStyle=3으로 박스형 가능").
+        # instead of a text outline.
         from src.quote_video.subtitle_sync import CaptionLine, CaptionTiming
 
         timing = CaptionTiming(line=CaptionLine(sequence_number=1, text="box"), start=0.0, end=1.0)

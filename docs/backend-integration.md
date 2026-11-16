@@ -1,6 +1,6 @@
 # POSTALK 백엔드 연동 안내
 
-이 문서는 릴스 파이프라인과 POSTALK 백엔드의 운영 연동 기준이다. 릴스 서비스는 프론트엔드가 직접 호출하는 공개 API가 아니라, 백엔드가 요청한 영상 4개를 합성하는 Railway 내부 서비스다. 사용자 권한, 파일 업로드, 생성 결과 보관, 진행률 제공은 백엔드가 맡는다.
+이 문서는 릴스 파이프라인과 POSTALK 백엔드의 운영 연동 기준이다. 릴스 서비스는 프론트엔드가 직접 호출하는 공개 API가 아니라, 백엔드가 요청한 영상 4·6·8개를 합성하는 Railway 내부 서비스다. 메뉴 수는 1~3개이며 사용자 권한, 파일 업로드, 생성 결과 보관, 진행률 제공은 백엔드가 맡는다.
 
 ## 1. 구성 요소별 역할
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 프론트엔드 | 영상 업로드, 릴스 생성 시작, 백엔드 진행률 표시 | 공개 |
 | POSTALK 백엔드 | 세션·파일 검증, Supabase 서명 URL 발급, 릴스 작업 상태와 결과 저장 | 공개 |
-| 릴스 파이프라인 | 4개 영상 다운로드, 자막·BGM·전환 합성, MP4·썸네일 업로드 | Railway 내부 전용 |
+| 릴스 파이프라인 | 메뉴 수에 따른 4·6·8개 영상 다운로드, AI 자막·BGM·전환 합성, MP4·썸네일 업로드 | Railway 내부 전용 |
 | Supabase Storage | 원본 영상, 완성 MP4, 썸네일 보관 | 서명 URL로만 접근 |
 
 브라우저는 `/reels/*` 경로와 `REELS_INTERNAL_API_KEY`를 사용하지 않는다. 프론트는 POSTALK 백엔드의 생성 세션·생성 작업 API만 호출한다.
@@ -32,7 +32,7 @@
 | 항목 | 값 | 주의 사항 |
 | --- | --- | --- |
 | 내부 주소 | `http://postalk-reels.railway.internal:8000` | Railway 서비스 이름이 다르면 해당 이름으로 변경 |
-| 상태 확인 | `GET /healthz` | 인증 없음, `{ "status": "ok" }` 반환 |
+| 상태 확인 | `GET /healthz` | 인증 없음. 서비스 이름과 미디어 저장소를 포함한 상태 응답 반환 |
 | API 접두사 | `/reels` | `GET /healthz`를 제외하고 내부 키 필요 |
 | 인증 헤더 | `x-reels-api-key` | `REELS_INTERNAL_API_KEY` 값 전송 |
 
@@ -70,19 +70,19 @@
 | `REELS_INTERNAL_API_KEY` | 필요 | 필요 | 서버 간 인증용 공유 비밀 값 |
 | `REELS_API_URL` | 불필요 | 필요 | Railway 내부 릴스 서비스 주소 |
 | `PORT` | 필요 | 불필요 | 기본 예시 `8000` |
-| `ANTHROPIC_API_KEY` | 선택 | 불필요 | `/reels/scripts`에서 LLM 대본 생성 기능을 직접 사용할 때만 필요 |
-| `LLM_MODEL` | 선택 | 불필요 | 대본 생성에 사용할 모델 |
+| `OPENAI_API_KEY` | 선택 | 불필요 | `/reels/scripts`에서 AI 대본·캡션·해시태그 생성에 사용 |
+| `OPENAI_MODEL` | 선택 | 불필요 | 대본 생성에 사용할 OpenAI 모델 |
 
 실제 API 키, 서명 URL, 내부 주소의 인증 정보는 코드·문서·PR 본문·로그에 적지 않는다.
 
 ## 5. Railway 배포와 점검
 
 1. 이 저장소를 백엔드와 같은 Railway 프로젝트·환경의 별도 Docker 서비스로 배포한다.
-2. 서비스에 `SUPABASE_URL`, `REELS_INTERNAL_API_KEY`, `PORT=8000`을 설정한다.
+2. 서비스에 `SUPABASE_URL`, `REELS_INTERNAL_API_KEY`, `OPENAI_API_KEY`, `PORT=8000`을 설정한다. `OPENAI_API_KEY`는 백엔드 서비스의 같은 이름 변수를 Railway 참조로 연결한다.
 3. 백엔드에 `REELS_API_URL=http://postalk-reels.railway.internal:8000`과 동일한 `REELS_INTERNAL_API_KEY`를 설정한다.
 4. 릴스 서비스 로그에서 FFmpeg가 포함된 컨테이너가 정상 기동하는지 확인한다.
 5. `GET /healthz`와 백엔드의 준비 상태 확인을 각각 수행한다.
-6. 테스트 영상 4개로 생성 작업을 한 건 실행하고, 결과 MP4·JPG가 Supabase에 저장되는지 확인한다.
+6. 메뉴 1개 영상 4개와 메뉴 2개 영상 6개로 각각 생성 작업을 실행하고, 결과 MP4·JPG가 Supabase에 저장되는지 확인한다.
 
 작업 상태는 현재 Python 프로세스 메모리에 보관한다. 서비스가 재시작되면 진행 중이던 `render_id`를 잃을 수 있으므로, 백엔드는 실패 또는 미완료 작업을 안전하게 다시 등록할 수 있어야 한다.
 

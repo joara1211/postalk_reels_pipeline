@@ -73,7 +73,9 @@ class MediaIn(BaseModel):
     scene_index: int
     menu_index: Optional[int]
     key: str
-    storage: Literal["s3", "supabase"] = "s3"
+    # POSTALK 운영 환경의 원본과 결과 파일은 Supabase Storage를 사용한다.
+    # 값을 생략한 백엔드 요청도 현재 운영 기준으로 해석한다.
+    storage: Literal["s3", "supabase"] = "supabase"
     download_url: str | None = None
 
 
@@ -111,7 +113,7 @@ def _load_template_or_400(concept: str) -> dict:
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "service": "postalk-reels", "mediaProvider": "supabase"}
 
 
 @router.get("/templates")
@@ -282,7 +284,7 @@ def _render_to_storage(
             "caption": request.caption,
             "hashtags": request.hashtags,
             "render_ms": render_ms,
-            "fallbacks": [],  # per-scene media substitution isn't implemented yet (CLAUDE.md 실패 대체)
+            "fallbacks": [],  # 장면별 미디어 대체는 아직 구현하지 않음
         },
         error=None,
     )

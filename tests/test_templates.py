@@ -29,7 +29,7 @@ class TestLoadTemplate(unittest.TestCase):
 
     def test_christmas_scene_rule_matches_simple(self):
         # Scene structure (hook/closeup/detail/outro, durations) is shared
-        # across concepts per CLAUDE.md — only render/design values differ.
+        # across concepts — only render/design values differ.
         simple = templates.load_template("simple")
         christmas = templates.load_template("christmas")
         self.assertEqual(simple["scene_rule"], christmas["scene_rule"])

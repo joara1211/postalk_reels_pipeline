@@ -6,9 +6,10 @@ section 3).
 
 The LLM call goes through the `LlmClient` protocol so the provider stays
 swappable and tests never touch the network. Callers that don't pass one get
-`default_llm_client()`: Claude (`AnthropicLlmClient`, ANTHROPIC_API_KEY) or
-Gemini (`GeminiLlmClient`, GEMINI_API_KEY), chosen by LLM_PROVIDER or by
-which key is set.
+`default_llm_client()`: OpenAI (`OpenAiLlmClient`, OPENAI_API_KEY — the
+backend's provider, used in production), Claude (`AnthropicLlmClient`,
+ANTHROPIC_API_KEY) or Gemini (`GeminiLlmClient`, GEMINI_API_KEY), chosen by
+LLM_PROVIDER or by which key is set.
 
 How a result is assembled, most-preferred first:
 1. The LLM's caption for every scene, cleaned up (emoji/unsupported symbols
@@ -32,6 +33,8 @@ import json
 import logging
 import os
 import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -131,19 +134,89 @@ class GeminiLlmClient:
         return response.text or ""
 
 
+class OpenAiLlmClient:
+    """OpenAI's Responses API over plain HTTP (stdlib only, no SDK), with
+    strict JSON-schema structured output. This is the provider the POSTALK
+    backend uses; on Railway the service gets the backend's OPENAI_API_KEY
+    as a variable reference. Model: OPENAI_MODEL, then LLM_MODEL, then
+    DEFAULT_MODEL."""
+
+    DEFAULT_MODEL = "gpt-4.1-mini"
+    API_URL = "https://api.openai.com/v1/responses"
+
+    def __init__(self, *, api_key: str | None = None, model: str | None = None, timeout: float = 60.0):
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.model = model or os.environ.get("OPENAI_MODEL") or os.environ.get("LLM_MODEL") or self.DEFAULT_MODEL
+        self.timeout = timeout
+        if not self.api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+
+    def _post(self, body: dict) -> dict:
+        request = urllib.request.Request(
+            self.API_URL,
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"content-type": "application/json", "authorization": f"Bearer {self.api_key}"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            # Surface OpenAI's own error message (never contains the key) so
+            # the "Script LLM attempt failed" log says why, e.g. 401 vs 429.
+            try:
+                detail = json.loads(error.read().decode("utf-8")).get("error", {}).get("message", "")
+            except Exception:
+                detail = ""
+            raise RuntimeError(f"OpenAI HTTP {error.code}: {detail[:200]}") from None
+
+    def complete(self, system_prompt: str, user_prompt: str, *, schema: dict | None = None) -> str:
+        body: dict = {"model": self.model, "instructions": system_prompt, "input": user_prompt}
+        if schema is not None:
+            body["text"] = {
+                "format": {"type": "json_schema", "name": "reels_script", "schema": schema, "strict": True}
+            }
+        payload = self._post(body)
+        if payload.get("status") not in (None, "completed"):
+            raise RuntimeError(f"LLM stopped early: {payload.get('status')} {payload.get('incomplete_details')}")
+        # The raw REST reply has no top-level `output_text` (that's an SDK
+        # convenience) — the text lives in output[].content[] items.
+        texts = []
+        for item in payload.get("output") or []:
+            if item.get("type") != "message":
+                continue
+            for part in item.get("content") or []:
+                if part.get("type") == "refusal":
+                    raise RuntimeError("LLM refused the request")
+                if part.get("type") == "output_text":
+                    texts.append(part.get("text", ""))
+        text = "".join(texts)
+        if not text.strip():
+            raise RuntimeError("OpenAI response contained no output text")
+        return text
+
+
+_PROVIDERS = {"openai": OpenAiLlmClient, "anthropic": AnthropicLlmClient, "gemini": GeminiLlmClient}
+
+
 def default_llm_client() -> LlmClient:
-    """Pick the provider from the environment: LLM_PROVIDER ("anthropic" |
-    "gemini") wins; otherwise Gemini when only GEMINI_API_KEY/GOOGLE_API_KEY
-    is set, Anthropic in every other case."""
+    """Pick the provider from the environment: LLM_PROVIDER ("openai" |
+    "anthropic" | "gemini") wins; otherwise the first provider whose key is
+    set, in the order OpenAI (what the POSTALK backend uses), Anthropic,
+    Gemini. With no key at all, Anthropic (which then reports the missing key)."""
     provider = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
     if not provider:
-        has_gemini = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
-        provider = "gemini" if has_gemini and not os.environ.get("ANTHROPIC_API_KEY") else "anthropic"
-    if provider == "gemini":
-        return GeminiLlmClient()
-    if provider == "anthropic":
-        return AnthropicLlmClient()
-    raise RuntimeError(f"Unknown LLM_PROVIDER: {provider}")
+        if os.environ.get("OPENAI_API_KEY"):
+            provider = "openai"
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+            provider = "gemini"
+        else:
+            provider = "anthropic"
+    if provider not in _PROVIDERS:
+        raise RuntimeError(f"Unknown LLM_PROVIDER: {provider}")
+    return _PROVIDERS[provider]()
 
 
 @dataclass(frozen=True)

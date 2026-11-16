@@ -2,8 +2,7 @@
 is fit to its target duration (middle-trim if long enough, slow-down if
 short, slow-down + repeat for very short clips), cropped to fill the 9:16
 canvas, concatenated, burned with ASS captions, faded in/out, and mixed
-with BGM. Per-scene audio is never used — on-site sound is removed
-entirely (CLAUDE.md: "촬영 원본 소리는 모두 제거한다").
+with BGM. Per-scene audio is never used — on-site sound is removed entirely.
 """
 
 from __future__ import annotations
@@ -131,8 +130,7 @@ def _fit_duration_filter(label_in: str, label_out: str, src_duration: float, tar
       (speed in (1, 2]) to stretch it to the target.
     - source is very short (< half the target): slow down 0.5x, then
       repeat it whole until it covers the target, then trim the excess.
-      (CLAUDE.md "바꿀 것": "0.5배속 슬로우 → 반복 → (최후) 정지 프레임" — the
-      final freeze-frame fallback isn't needed here since repeating an
+      The final freeze-frame fallback isn't needed here since repeating an
       already-looping clip always reaches the target exactly.)
     """
     eps = 1e-6

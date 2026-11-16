@@ -1,6 +1,6 @@
 # POSTALK Reels Pipeline
 
-POSTALK 백엔드가 전달한 영상 4개를 세로형 릴스로 합성하는 내부 서비스입니다. 원본 영상의 소리는 제거하고, 템플릿의 자막·전환·배경음악을 적용해 MP4와 썸네일을 만듭니다. 프론트엔드는 이 서비스에 직접 요청하지 않습니다.
+POSTALK 백엔드가 전달한 영상 4·6·8개를 세로형 릴스로 합성하는 내부 서비스입니다. 메뉴 수는 1~3개이며, 각 메뉴에 클로즈업과 상세 장면을 배정합니다. 원본 영상의 소리는 제거하고, AI 자막·전환·배경음악을 적용해 MP4와 썸네일을 만듭니다. 프론트엔드는 이 서비스에 직접 요청하지 않습니다.
 
 현재 백엔드 연동은 `simple`, `christmas` 두 콘셉트를 사용합니다. 릴스 결과는 1080×1920 MP4, 약 13초이며 Supabase Storage 서명 URL로만 입력과 출력을 주고받습니다.
 
@@ -11,14 +11,15 @@ POSTALK 백엔드가 전달한 영상 4개를 세로형 릴스로 합성하는 �
 | `PORT` | FastAPI 포트. 기본 예시는 `8000` |
 | `SUPABASE_URL` | 서명 URL의 프로젝트 검증에 사용 |
 | `REELS_INTERNAL_API_KEY` | 백엔드와 공유하는 내부 호출 키 |
-| `ANTHROPIC_API_KEY` | 이 서비스에서 대본 API를 직접 사용할 때만 필요 |
-| `LLM_MODEL` | 선택한 대본 생성 모델 |
+| `OPENAI_API_KEY` | AI가 장면 자막·게시글 캡션·해시태그를 생성할 때 필요 |
+| `OPENAI_MODEL` | 선택한 대본 생성 모델. 기본값은 `gpt-4.1-mini` |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` | 선택. 로컬 테스트용 대체 AI 제공자. 키가 여러 개면 OpenAI → Anthropic → Gemini 순으로 쓰고, `LLM_PROVIDER`로 강제 지정 |
 
-Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백엔드의 `REELS_API_URL`은 `http://<service>.railway.internal:8000` 형식이며, 두 서비스의 `REELS_INTERNAL_API_KEY` 값은 같아야 합니다.
+Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백엔드의 `REELS_API_URL`은 `http://<service>.railway.internal:8000` 형식이며, 두 서비스의 `REELS_INTERNAL_API_KEY` 값은 같아야 합니다. `OPENAI_API_KEY`가 없거나 AI 응답이 형식에 맞지 않으면, 서비스는 빈 해시태그를 반환하지 않고 기본 캡션·해시태그로 안전하게 대체합니다.
 
 ## 내부 API
 
-`GET /healthz`를 제외한 모든 경로는 `x-reels-api-key` 헤더가 필요합니다.
+`GET /healthz`를 제외한 모든 경로는 `x-reels-api-key` 헤더가 필요합니다. 상태 확인 응답에는 서비스 이름과 현재 미디어 저장소(`supabase`)도 포함됩니다.
 
 | 메서드·경로 | 설명 |
 | --- | --- |
@@ -51,7 +52,7 @@ Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백�
 }
 ```
 
-백엔드 연동에서는 간판, 대표 메뉴, 메뉴 상세, 가게 입구 순서의 영상 4개를 보냅니다. 같은 `ad_id`가 처리 중이면 새 작업을 만들지 않고 `409 ALREADY_RENDERING`과 기존 `render_id`를 반환합니다.
+백엔드 연동에서는 간판, 메뉴별 클로즈업·상세, 가게 입구 순서로 영상을 보냅니다. 메뉴 1개는 4개, 2개는 6개, 3개는 8개 영상입니다. 같은 `ad_id`가 처리 중이면 새 작업을 만들지 않고 `409 ALREADY_RENDERING`과 기존 `render_id`를 반환합니다.
 
 상태는 `queued`, `rendering`, `done`, `failed`입니다. 진행 단계는 `preparing`, `composing`, `uploading`이며, 완료 응답에는 MP4·썸네일 Storage 경로와 길이가 포함됩니다. 입력 URL, 업로드 URL, 내부 API 키는 서버 간 통신에만 사용합니다.
 

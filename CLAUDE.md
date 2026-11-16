@@ -142,15 +142,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 작업 상태 저장소: 인메모리 `JobStore` 그대로 두고, 재시작으로 잃은 작업은 백엔드가 같은 요청을 다시 등록한다.
   `uploads` 있는 요청은 같은 `ad_id`가 이미 done이면 재렌더 없이 기존 결과를 돌려준다(`create_render_if_not_active(reuse_completed=True)`).
   단일 프로세스 가정이므로 워커를 여러 개 띄우면 안 된다.
+- (2026-11-16 병합) 백엔드는 메뉴 1~3개(영상 4·6·8개)를 보낸다. 릴스 서비스가 자막·캡션·해시태그를 직접 생성한다.
+- (2026-11-16 병합) 운영 LLM은 **OpenAI**(백엔드와 같은 제공자). Railway에서 `OPENAI_API_KEY`를 백엔드 변수 참조로 연결, 기본 모델 `gpt-4.1-mini`.
+- 협업 방식: 팀원 포크(`superkid` 리모트 = `Superkid0714/postalk_reels_pipeline`)가 Railway 배포 원본이다.
+  내 레포(`reels` 리모트)에서 작업 → 팀원 레포로 PR. **팀원 레포에는 `CLAUDE.md`·`docs/legacy-CLAUDE.md`를 보내지 않는다**
+  (팀원이 삭제함. 내 레포에만 유지 — PR 브랜치에서 두 파일을 빼고 보낸다).
 
 ### 아직 미정
 
-- 백엔드 연동은 현재 영상 4개(메뉴 1개) 기준으로 설명돼 있다. 메뉴 2·3개(영상 6·8개)를 백엔드가 보낼지 확인 필요(코드는 지원).
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
-- LLM 제공자 — 지금은 `script_generator.AnthropicLlmClient`(공식 `anthropic` SDK, 기본 모델 `claude-opus-5-5`, effort `medium`,
-  구조화 출력(JSON 스키마) + 서버측 거절 대체(`fallbacks: "default"`))와 `GeminiLlmClient`(공식 `google-genai` SDK,
-  기본 모델 `gemini-2.5-flash`, JSON 스키마 출력) 두 가지. `default_llm_client()`가 고른다: `LLM_PROVIDER`(`anthropic`|`gemini`)가
-  있으면 그걸, 없으면 `GEMINI_API_KEY`만 있을 때 Gemini, 그 외엔 Claude. `LLM_MODEL`로 모델 교체.
+- LLM 제공자 구현 — `script_generator`에 세 가지, `default_llm_client()`가 고른다: `LLM_PROVIDER`(`openai`|`anthropic`|`gemini`)가
+  있으면 그걸, 없으면 키가 있는 첫 번째를 OpenAI → Anthropic → Gemini 순으로.
+  `OpenAiLlmClient`(stdlib HTTP, Responses API, strict JSON 스키마, 모델 `OPENAI_MODEL` → `LLM_MODEL` → `gpt-4.1-mini`),
+  `AnthropicLlmClient`(공식 `anthropic` SDK, 기본 `claude-opus-5-5`, effort `medium`, 구조화 출력 + `fallbacks: "default"`),
+  `GeminiLlmClient`(공식 `google-genai` SDK, 기본 `gemini-2.5-flash`). Anthropic·Gemini는 로컬 테스트용 대안.
   `LlmClient` 프로토콜만 맞추면 다른 제공자도 추가 가능(`generate_script(..., llm_client=...)`).
 
 ### 자막(대본) 생성 규칙 (2026-11-15 개편)
@@ -181,5 +186,6 @@ python -m src.quote_video.pipeline --request tests/fixtures/render_request_1menu
 
 서버 환경변수:
 - 운영 필수: `SUPABASE_URL`(서명 URL 검증용), `REELS_INTERNAL_API_KEY`(백엔드와 공유), `PORT`(기본 8000). Dockerfile은 앞의 두 개가 없으면 기동하지 않는다.
-- 선택: `ANTHROPIC_API_KEY` 또는 `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`(`/reels/scripts` 직접 쓸 때만, 현재 연동은 백엔드가 자막을 만들어 보냄),
+- 자막 AI: `OPENAI_API_KEY`(운영), `OPENAI_MODEL`. 없으면 기본 문구로 대체(`is_fallback: true`).
+- 선택: `ANTHROPIC_API_KEY`·`GEMINI_API_KEY`·`LLM_PROVIDER`·`LLM_MODEL`(로컬 테스트용 대체 제공자),
   `NEXT_BASE_URL`·`REELS_CALLBACK_API_KEY`(콜백, 미설정 시 스킵), `STORAGE_ROOT`(로컬 개발용, 기본 `./storage`).

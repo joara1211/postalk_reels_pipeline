@@ -21,7 +21,7 @@ from src.quote_video.video_composer import (
 
 
 class TestFitDurationFilter(unittest.TestCase):
-    """The per-scene duration-fit rule (CLAUDE.md "바꿀 것"): trim the middle
+    """The per-scene duration-fit rule: trim the middle
     if the clip is long enough, slow down just enough if it's a bit short,
     slow 0.5x + repeat if it's very short."""
 

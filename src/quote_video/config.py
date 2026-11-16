@@ -8,8 +8,8 @@ ffmpeg pass (burn ASS captions, mix BGM, fade in/out) -> final MP4.
 Only infra constants live here (paths, canvas, encode speed, timeout).
 Everything design-related (font, colors, margins, fade length, BGM
 track/volume, transition) lives in templates/<concept>.json's "render" key
-instead — design isn't finalized yet (CLAUDE.md), so the team needs to be
-able to retune it without a code change/redeploy. See templates.py.
+instead — the design can be retuned without a code change/redeploy. See
+templates.py.
 """
 
 from pathlib import Path
