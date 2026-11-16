@@ -373,10 +373,13 @@ def _default_scene_text(scene: Scene, store: dict, menus: list[dict]) -> str:
     if scene.scene_type == "detail":
         price = _extract_price(description)
         candidates = [f"{name} {price}" if price else "", price or "", _first_clause(description)]
+        candidates.append(f"{name}, 꼭 맛보세요")
         for candidate in candidates:
             if candidate and len(candidate) <= limit and candidate != name:
                 return candidate
-        return _fit(_first_clause(description) or name, limit)
+        # Never cut a description mid-phrase ("직접 캔 쑥으로 만든 향긋한") —
+        # the menu name alone reads better than a sentence that stops short.
+        return _fit(name, limit)
     return _fit(name, limit)
 
 
@@ -463,7 +466,10 @@ def generate_script(
             raw = client.complete(system_prompt, user_prompt + note, schema=schema)
             draft = _parse(raw, scene_plan)
         except Exception as error:
-            logger.warning("Script LLM attempt %d failed: %s", attempt + 1, type(error).__name__)
+            # The SDK error text (status + reason) never contains the API key.
+            logger.warning(
+                "Script LLM attempt %d failed: %s: %s", attempt + 1, type(error).__name__, str(error)[:300]
+            )
             if isinstance(error, RuntimeError) and ("API_KEY" in str(error) or "LLM_PROVIDER" in str(error)):
                 break  # misconfigured — a second try can't succeed
             continue
