@@ -124,7 +124,7 @@ def rebalance_menu_scene_durations(
     Each menu's own total (the sum of its own scenes' durations, from
     `build_scene_plan()`'s equal split) is preserved exactly — this only
     moves time *between* a menu's own scenes, never changes a menu's share
-    or the overall 13/14/15s total. Every scene is clamped to
+    or the overall 16/20/24s total. Every scene is clamped to
     `[min_ratio, max_ratio]` of its equal-split baseline so one scene can't
     swallow its menu's whole budget; any remainder left by clamping/
     rounding is handed to whichever scene in that menu still has the most

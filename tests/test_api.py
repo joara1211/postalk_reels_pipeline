@@ -310,7 +310,7 @@ class TestRenderRealFfmpeg(ApiTestCase):
                 result = self.client.get(f"/reels/renders/{render_id}").json()
 
             self.assertEqual(result["status"], "done", result.get("error"))
-            self.assertAlmostEqual(result["result"]["duration_sec"], 13.0)
+            self.assertAlmostEqual(result["result"]["duration_sec"], 16.0)
             video_path = storage_root / result["result"]["video_key"]
             thumb_path = storage_root / result["result"]["thumbnail_key"]
             self.assertTrue(video_path.exists())

@@ -43,7 +43,7 @@ class TestBuildScenePlan(unittest.TestCase):
         scenes = templates.build_scene_plan(self.template, menu_count=1)
         self.assertEqual([s.scene_type for s in scenes], ["hook", "closeup", "detail", "outro"])
         self.assertEqual([s.menu_index for s in scenes], [None, 0, 0, None])
-        self.assertAlmostEqual(sum(s.duration_sec for s in scenes), 13.0)
+        self.assertAlmostEqual(sum(s.duration_sec for s in scenes), 16.0)
 
     def test_two_menus_matches_spec_table(self):
         scenes = templates.build_scene_plan(self.template, menu_count=2)
@@ -52,12 +52,12 @@ class TestBuildScenePlan(unittest.TestCase):
             ["hook", "closeup", "detail", "closeup", "detail", "outro"],
         )
         self.assertEqual([s.menu_index for s in scenes], [None, 0, 0, 1, 1, None])
-        self.assertAlmostEqual(sum(s.duration_sec for s in scenes), 14.0)
+        self.assertAlmostEqual(sum(s.duration_sec for s in scenes), 20.0)
 
     def test_three_menus_matches_spec_table(self):
         scenes = templates.build_scene_plan(self.template, menu_count=3)
         self.assertEqual(len(scenes), 8)
-        self.assertAlmostEqual(sum(s.duration_sec for s in scenes), 15.0)
+        self.assertAlmostEqual(sum(s.duration_sec for s in scenes), 24.0)
 
     def test_scene_index_is_sequential_from_zero(self):
         scenes = templates.build_scene_plan(self.template, menu_count=2)
@@ -81,7 +81,7 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
         self.fps = self.template["render"]["canvas"]["fps"]
 
     def test_longer_footage_gets_more_time_shorter_gets_less(self):
-        # 1 menu: closeup(1)=9s budget split 4.5/4.5 by default. closeup
+        # 1 menu: closeup(1)=10s budget split 5/5 by default. closeup
         # filmed much longer than detail -> closeup should end up bigger.
         scenes = templates.build_scene_plan(self.template, menu_count=1)
         closeup = next(s for s in scenes if s.scene_type == "closeup")
@@ -92,8 +92,8 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
         new_closeup = next(s for s in rebalanced if s.scene_index == closeup.scene_index)
         new_detail = next(s for s in rebalanced if s.scene_index == detail.scene_index)
 
-        self.assertGreater(new_closeup.duration_sec, 4.5)
-        self.assertLess(new_detail.duration_sec, 4.5)
+        self.assertGreater(new_closeup.duration_sec, 5.0)
+        self.assertLess(new_detail.duration_sec, 5.0)
 
     def test_menu_total_is_preserved_exactly(self):
         scenes = templates.build_scene_plan(self.template, menu_count=1)
@@ -111,7 +111,7 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
 
         rebalanced = templates.rebalance_menu_scene_durations(scenes, probed, self.fps)
 
-        self.assertAlmostEqual(sum(s.duration_sec for s in rebalanced), 14.0)
+        self.assertAlmostEqual(sum(s.duration_sec for s in rebalanced), 20.0)
 
     def test_hook_and_outro_are_never_touched(self):
         scenes = templates.build_scene_plan(self.template, menu_count=1)
@@ -121,8 +121,8 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
 
         hook = next(s for s in rebalanced if s.scene_type == "hook")
         outro = next(s for s in rebalanced if s.scene_type == "outro")
-        self.assertEqual(hook.duration_sec, 2.0)
-        self.assertEqual(outro.duration_sec, 2.0)
+        self.assertEqual(hook.duration_sec, 3.0)
+        self.assertEqual(outro.duration_sec, 3.0)
 
     def test_extreme_footage_ratio_is_clamped_not_unbounded(self):
         scenes = templates.build_scene_plan(self.template, menu_count=1)
@@ -134,16 +134,16 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
         new_closeup = next(s for s in rebalanced if s.scene_index == closeup.scene_index)
         new_detail = next(s for s in rebalanced if s.scene_index == detail.scene_index)
 
-        self.assertLessEqual(new_closeup.duration_sec, 4.5 * 2.0)
-        self.assertGreaterEqual(new_detail.duration_sec, 4.5 * 0.5)
-        self.assertAlmostEqual(new_closeup.duration_sec + new_detail.duration_sec, 9.0)
+        self.assertLessEqual(new_closeup.duration_sec, 5.0 * 2.0)
+        self.assertGreaterEqual(new_detail.duration_sec, 5.0 * 0.5)
+        self.assertAlmostEqual(new_closeup.duration_sec + new_detail.duration_sec, 10.0)
 
     def test_missing_probed_duration_falls_back_to_equal_split(self):
         scenes = templates.build_scene_plan(self.template, menu_count=1)
         rebalanced = templates.rebalance_menu_scene_durations(scenes, {}, self.fps)
         for scene in rebalanced:
             if scene.menu_index is not None:
-                self.assertAlmostEqual(scene.duration_sec, 4.5)
+                self.assertAlmostEqual(scene.duration_sec, 5.0)
 
     def test_each_menu_keeps_its_own_budget_independent_of_other_menus(self):
         # menu 2's footage being very long shouldn't eat into menu 1's budget.
@@ -157,8 +157,8 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
         menu0_total = sum(s.duration_sec for s in rebalanced if s.menu_index == 0)
         menu1_total = sum(s.duration_sec for s in rebalanced if s.menu_index == 1)
 
-        self.assertAlmostEqual(menu0_total, 5.0)  # 2 menus -> 10s / 2 = 5s each
-        self.assertAlmostEqual(menu1_total, 5.0)
+        self.assertAlmostEqual(menu0_total, 7.0)  # 2 menus -> 14s / 2 = 7s each
+        self.assertAlmostEqual(menu1_total, 7.0)
 
     def test_frame_exact_across_the_whole_scene_list(self):
         fps = self.fps
@@ -169,7 +169,7 @@ class TestRebalanceMenuSceneDurations(unittest.TestCase):
         for scene in rebalanced:
             frames = scene.duration_sec * fps
             self.assertAlmostEqual(frames, round(frames))
-        self.assertAlmostEqual(sum(s.duration_sec for s in rebalanced), 15.0)
+        self.assertAlmostEqual(sum(s.duration_sec for s in rebalanced), 24.0)
 
 
 if __name__ == "__main__":

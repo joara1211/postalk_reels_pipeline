@@ -12,8 +12,8 @@
         "scene_type": "hook",
         "position": "first",
         "source": "camera",
-        "duration_sec": 2.0,
-        "caption_max_chars": 14,
+        "duration_sec": 3.0,
+        "caption_max_chars": 20,
         "min_record_sec": 3,
         "guide": "대표 상품이 모두 보이게 찍어주세요",
         "guide_image": "hook"
@@ -22,8 +22,8 @@
         "scene_type": "outro",
         "position": "last",
         "source": "gallery",
-        "duration_sec": 2.0,
-        "caption_max_chars": 16,
+        "duration_sec": 3.0,
+        "caption_max_chars": 20,
         "min_record_sec": 2,
         "guide": "가게 모습이 담긴 영상을 골라주세요",
         "guide_image": "outro"
@@ -33,7 +33,7 @@
       {
         "scene_type": "closeup",
         "source": "camera",
-        "caption_max_chars": 12,
+        "caption_max_chars": 18,
         "min_record_sec": 3,
         "guide": "가까이서 천천히 찍어주세요",
         "guide_image": "closeup"
@@ -41,13 +41,13 @@
       {
         "scene_type": "detail",
         "source": "camera",
-        "caption_max_chars": 16,
+        "caption_max_chars": 24,
         "min_record_sec": 3,
         "guide": "단면이나 질감이 보이게 찍어주세요",
         "guide_image": "detail"
       }
     ],
-    "menu_block_sec": { "1": 9.0, "2": 10.0, "3": 11.0 }
+    "menu_block_sec": { "1": 10.0, "2": 14.0, "3": 18.0 }
   },
   "render": {
     "_note": "디자인 미확정 임시값. 팀 디자인 확정되면 이 블록만 고치면 된다 (코드 변경 없음).",

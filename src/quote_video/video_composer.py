@@ -227,7 +227,7 @@ def build_ffmpeg_command(
     `transition_duration > 0` joins scenes with an ffmpeg `xfade` crossfade
     instead of a hard-cut `concat`. To keep the final output at the same
     total duration as without transitions (every scene's `target_duration`
-    still sums to the planned 13/14/15s), every scene but the last is first
+    still sums to the planned 16/20/24s), every scene but the last is first
     stretched/fit to `target_duration + transition_duration` — the extra
     `transition_duration` at its tail is exactly what gets folded into the
     next scene's crossfade, so the combined result lands back on the

@@ -48,16 +48,16 @@ class TestRunPipelineDeadline(unittest.TestCase):
         scene_specs = self.mock_compose.call_args.args[0]
         hook, closeup, detail, outro = (d for _, d in scene_specs)
 
-        self.assertEqual(hook, 2.0)
-        self.assertEqual(outro, 2.0)
+        self.assertEqual(hook, 3.0)
+        self.assertEqual(outro, 3.0)
         # closeup/detail aren't forced to a flat 4.5/4.5 split anymore —
         # they're weighted by each scene's actual recorded length
         # (2.mp4/closeup is longer than 3.mp4/detail, see
         # templates.rebalance_menu_scene_durations()), but the menu's own
-        # 9s budget is still preserved exactly.
-        self.assertAlmostEqual(closeup + detail, 9.0)
+        # 10s budget is still preserved exactly.
+        self.assertAlmostEqual(closeup + detail, 10.0)
         self.assertGreater(closeup, detail)
-        self.assertAlmostEqual(hook + closeup + detail + outro, 13.0)
+        self.assertAlmostEqual(hook + closeup + detail + outro, 16.0)
 
     def test_bgm_and_subtitle_settings_come_from_the_template(self):
         run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))
@@ -125,9 +125,9 @@ class TestRunPipelineDurationRebalancing(unittest.TestCase):
         scene_specs = self.mock_compose.call_args.args[0]
         _hook, closeup, detail, _outro = (d for _, d in scene_specs)
 
-        self.assertGreater(closeup, 4.5)
-        self.assertLess(detail, 4.5)
-        self.assertAlmostEqual(closeup + detail, 9.0)
+        self.assertGreater(closeup, 5.0)
+        self.assertLess(detail, 5.0)
+        self.assertAlmostEqual(closeup + detail, 10.0)
 
     def test_probing_uses_the_shared_deadline(self):
         run_pipeline(self.request, MEDIA_ROOT, Path("output/final.mp4"))

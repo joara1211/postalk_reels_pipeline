@@ -26,12 +26,12 @@
 
 - 사용자는 고정 계정 user_id = 1. 가게 이름·주소는 입력받지 않으므로 Next.js가 회원 정보에서 채워 보낸다.
 - 파일은 Supabase Storage로 주고받는다(2026-11-02 결정: S3 연동은 하지 않는다). 릴스 서비스는 Supabase 비밀 키를 갖지 않고, 백엔드가 발급한 **서명 URL**로만 원본을 내려받고 결과를 올린다. `media[].key`와 `result.video_key`·`thumbnail_key`는 `uploads` 버킷 안의 객체 경로이며, 브라우저에서 열리는 URL로 바꾸는 것은 Next.js가 맡는다. `storage` 필드는 `supabase`여야 한다.
-- 렌더링 목표 1건당 30초 이내. 결과물은 1080×1920 MP4(H.264/AAC), 13~15초.
+- 렌더링 목표 1건당 30초 이내. 결과물은 1080×1920 MP4(H.264/AAC), 16~24초(2026-11-16 변경, 이전 13~15초).
 - 시간은 ISO 8601, 길이는 초, 처리 시간은 밀리초.
 
 ## 2. 템플릿과 장면 구성
 
-장면 수는 메뉴 수에 따라 달라진다(SC-03, SC-04). 공통 장면 2개(훅·마무리)에 메뉴마다 2개(클로즈업·디테일)를 더한다. 장면 규칙은 2종 템플릿 공통이고, 메뉴 수가 늘면 메뉴 장면이 짧아져 전체 길이를 13~15초로 유지한다.
+장면 수는 메뉴 수에 따라 달라진다(SC-03, SC-04). 공통 장면 2개(훅·마무리)에 메뉴마다 2개(클로즈업·디테일)를 더한다. 장면 규칙은 2종 템플릿 공통이고, 메뉴 수가 늘면 전체 길이가 16·20·24초로 늘어나되, 메뉴 장면 하나는 최소 3초를 지켜 2줄 자막을 읽을 시간을 준다.
 
 | 순서 | 장면(scene_type) | 대상 | 재료 | 자막 내용 |
 | --- | --- | --- | --- | --- |
@@ -42,13 +42,13 @@
 
 | 메뉴 수 | 장면 수 | 촬영 + 갤러리 | 메뉴 장면 길이 | 전체 길이 |
 | --- | --- | --- | --- | --- |
-| 1 | 4 | 3 + 1 | 4.5초 | 13초 |
-| 2 | 6 | 5 + 1 | 2.5초 | 14초 |
-| 3 | 8 | 7 + 1 | 약 1.8초 | 15초 |
+| 1 | 4 | 3 + 1 | 5초 | 16초 |
+| 2 | 6 | 5 + 1 | 3.5초 | 20초 |
+| 3 | 8 | 7 + 1 | 3초 | 24초 |
 
-훅과 마무리는 항상 2초. "메뉴 장면 길이"는 메뉴 하나가 받는 평균치다 — 2026-11-02부로 같은 메뉴의 클로즈업/디테일을
+훅과 마무리는 항상 3초. 자막 최대 글자 수(공백 포함)는 훅 20, 클로즈업 18, 디테일 24, 마무리 20자(2026-11-16, 2줄 자막 기준). "메뉴 장면 길이"는 메뉴 하나가 받는 평균치다 — 2026-11-02부로 같은 메뉴의 클로즈업/디테일을
 무조건 반반으로 나누지 않고, 실제로 더 길게 찍은 장면에 더 많은 시간을 준다(평균치의 0.5~2배 범위 안에서). 메뉴 하나의
-합계와 전체 길이(13~15초)는 항상 이 표대로 정확히 지켜진다 — 바뀌는 건 그 메뉴 안에서 클로즈업과 디테일이 어떻게
+합계와 전체 길이(16·20·24초)는 항상 이 표대로 정확히 지켜진다 — 바뀌는 건 그 메뉴 안에서 클로즈업과 디테일이 어떻게
 나뉘는지뿐이다. 가격 입력란이 없으므로(SC-03) 가격은 메뉴 설명에서 대본 생성 시 추출하고, 없으면 특징만 넣는다.
 
 콘셉트별 자막·오디오
@@ -76,14 +76,14 @@ BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지
       "audio": { "bgm": "simple_01", "bgm_volume": 0.3 },
       "scene_rule": {
         "common": [
-          { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 2.0, "caption_max_chars": 14, "min_record_sec": 3, "guide": "대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
-          { "scene_type": "outro", "position": "last", "source": "gallery", "duration_sec": 2.0, "caption_max_chars": 16, "min_record_sec": 2, "guide": "가게 모습이 담긴 영상을 골라주세요", "guide_image": "outro" }
+          { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 3, "guide": "대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
+          { "scene_type": "outro", "position": "last", "source": "gallery", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 2, "guide": "가게 모습이 담긴 영상을 골라주세요", "guide_image": "outro" }
         ],
         "per_menu": [
-          { "scene_type": "closeup", "source": "camera", "caption_max_chars": 12, "min_record_sec": 3, "guide": "가까이서 천천히 찍어주세요", "guide_image": "closeup" },
-          { "scene_type": "detail", "source": "camera", "caption_max_chars": 16, "min_record_sec": 3, "guide": "단면이나 질감이 보이게 찍어주세요", "guide_image": "detail" }
+          { "scene_type": "closeup", "source": "camera", "caption_max_chars": 18, "min_record_sec": 3, "guide": "가까이서 천천히 찍어주세요", "guide_image": "closeup" },
+          { "scene_type": "detail", "source": "camera", "caption_max_chars": 24, "min_record_sec": 3, "guide": "단면이나 질감이 보이게 찍어주세요", "guide_image": "detail" }
         ],
-        "menu_block_sec": { "1": 9.0, "2": 10.0, "3": 11.0 }
+        "menu_block_sec": { "1": 10.0, "2": 14.0, "3": 18.0 }
       }
     }
   ]
@@ -136,10 +136,10 @@ SC-06에 진입하면 status가 done이 될 때까지 조회한다.
   "status": "done",
   "is_fallback": false,
   "scenes": [
-    { "scene_index": 0, "scene_type": "hook", "menu_index": null, "target": "가게", "text": "30년 전통 해오름 떡집", "max_chars": 14 },
-    { "scene_index": 1, "scene_type": "closeup", "menu_index": 0, "target": "창억떡", "text": "쫀득한 창억떡", "max_chars": 12 },
-    { "scene_index": 2, "scene_type": "detail", "menu_index": 0, "target": "창억떡", "text": "한 팩 5,000원의 행복", "max_chars": 16 },
-    { "scene_index": 3, "scene_type": "outro", "menu_index": null, "target": "가게", "text": "오늘 바로 들러주세요", "max_chars": 16 }
+    { "scene_index": 0, "scene_type": "hook", "menu_index": null, "target": "가게", "text": "30년 전통 해오름 떡집", "max_chars": 20 },
+    { "scene_index": 1, "scene_type": "closeup", "menu_index": 0, "target": "창억떡", "text": "쫀득한 창억떡", "max_chars": 18 },
+    { "scene_index": 2, "scene_type": "detail", "menu_index": 0, "target": "창억떡", "text": "한 팩 5,000원의 행복", "max_chars": 24 },
+    { "scene_index": 3, "scene_type": "outro", "menu_index": null, "target": "가게", "text": "오늘 바로 들러주세요", "max_chars": 20 }
   ],
   "caption": "30년 전통 방식 그대로, 해오름 떡집 창억떡을 만나보세요.",
   "hashtags": ["#창억떡", "#떡집", "#동네맛집"],
@@ -237,7 +237,7 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
     "thumbnail_key": "1/ad_20261120_0042/generated/ad_20261120_0042.jpg",
     "video_bytes": 3145728,
     "thumbnail_bytes": 143360,
-    "duration_sec": 13.0,
+    "duration_sec": 16.0,
     "caption": "30년 전통 방식 그대로, 해오름 떡집 창억떡을 만나보세요.",
     "hashtags": ["#창억떡", "#떡집", "#동네맛집"],
     "render_ms": 24180,

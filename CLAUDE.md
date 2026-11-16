@@ -35,10 +35,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **생성형 영상 AI는 쓰지 않는다.** 템플릿 + FFmpeg만.
 - **장면 구성은 메뉴 수에 따라 달라진다.** `hook`(가게, 촬영) → 메뉴마다 `closeup`·`detail`(촬영) → `outro`(가게, 갤러리 영상).
-  메뉴 1/2/3개 → 장면 4/6/8개, 전체 13/14/15초. hook·outro는 2초, 메뉴 블록은 9/10/11초.
+  메뉴 1/2/3개 → 장면 4/6/8개, 전체 **16/20/24초**. hook·outro는 3초, 메뉴 블록은 10/14/18초(메뉴 장면 5/3.5/3초).
+  **(2026-11-16 사용자 결정, 이전 13/14/15초·hook/outro 2초)** 자막이 너무 짧다는 피드백으로 글자 수 한도를 hook 20·closeup 18·
+  detail 24·outro 20자(2줄 자막)로 늘리고, 그걸 읽을 시간을 위해 영상도 늘렸다. 프론트·백엔드에 알려야 함(아래 "팀과 맞출 것").
   **메뉴 블록 안에서 closeup/detail 배분은 2026-11-02부로 더 이상 무조건 균등 분할이 아니다** — 실제 촬영 길이에 비례해서
   배분하고(길게 찍은 장면에 더 많은 시간), 장면 하나가 배분 기준치의 0.5~2배를 벗어나지 않게만 막는다
-  (`templates.rebalance_menu_scene_durations()`). 메뉴 자신의 총 예산과 전체 13/14/15초는 그대로 지켜진다 — 바뀌는 건
+  (`templates.rebalance_menu_scene_durations()`). 메뉴 자신의 총 예산과 전체 16/20/24초는 그대로 지켜진다 — 바뀌는 건
   "균등 분할이냐 비례 분할이냐"뿐이다.
 - **콘셉트 2종**: `simple`(심플), `christmas`(크리스마스). 릴스·카드뉴스 공통.
   **두 콘셉트의 디자인(컷 속도, 전환, 자막 스타일, 색, 폰트, BGM 곡)은 아직 미정이다.** 템플릿 JSON 값으로만 표현하고
@@ -150,6 +152,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 아직 미정
 
+- **(2026-11-16) 영상 길이 16/20/24초·자막 한도 18~24자 변경을 프론트·백엔드에 공유**(프론트 글자 수 표시는 `GET /reels/templates`의 `caption_max_chars`를 읽으면 자동 반영).
+
 - 메뉴당 2장면 규칙에 대한 프론트 최종 동의
 - LLM 제공자 구현 — `script_generator`에 세 가지, `default_llm_client()`가 고른다: `LLM_PROVIDER`(`openai`|`anthropic`|`gemini`)가
   있으면 그걸, 없으면 키가 있는 첫 번째를 OpenAI → Anthropic → Gemini 순으로.
@@ -165,6 +169,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   그래도 넘치면 **그 장면만** 사용자 입력 기반 기본 문구로 바꾼다(`is_fallback`은 false 유지). 전체 기본 문구(`is_fallback: true`)는
   LLM 결과가 아예 없을 때만(키 없음, 네트워크 오류, JSON 2회 실패).
 - 자막에서 이모지·특수기호는 제거한다(자막 폰트에 글리프가 없어 빈 네모로 나옴). 해시태그는 `#` + 띄어쓰기 없음, 중복 제거, 30개 이하.
+- 자막은 해요체 존댓말(반말 금지), 캡션도 해요체로 통일. 장면마다 한도의 약 75~100%(`_recommended_min_chars()`)를 채우도록 프롬프트에서 요청.
 - 기본 문구: hook=가게명, closeup=메뉴명, detail=메뉴명+가격 → 가격 → 설명 첫 구절, outro=`{가게명}에서 만나요`. 캡션은 가게·메뉴 설명으로 구성.
 - 심플·크리스마스 콘셉트의 디자인 전체
 
