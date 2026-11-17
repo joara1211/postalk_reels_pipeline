@@ -8,3 +8,6 @@ storage/
 .env
 .env.*
 !.env.example
+
+# 로컬 샘플 영상 (개인 촬영본, 공개 레포에 올리지 않음)
+samples/
