@@ -74,12 +74,12 @@ BGM은 콘셉트별 곡 목록(`audio.bgm_tracks`, 심플 4곡·크리스마스 
       "audio": { "bgm": "assets/bgm/MP_맑은 아침 (Short).mp3", "bgm_tracks": ["assets/bgm/MP_맑은 아침 (Short).mp3", "assets/bgm/simple_go_to_the_picnic.mp3", "..."], "bgm_volume": 0.3 },
       "scene_rule": {
         "common": [
-          { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 3, "guide": "대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
-          { "scene_type": "outro", "position": "last", "source": "gallery", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 2, "guide": "가게 모습이 담긴 영상을 골라주세요", "guide_image": "outro" }
+          { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 3, "guide": "휴대폰을 가로로 들고 대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
+          { "scene_type": "outro", "position": "last", "source": "gallery", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 2, "guide": "가게 모습이 담긴 가로 영상을 골라주세요", "guide_image": "outro" }
         ],
         "per_menu": [
-          { "scene_type": "closeup", "source": "camera", "caption_max_chars": 18, "min_record_sec": 3, "guide": "가까이서 천천히 찍어주세요", "guide_image": "closeup" },
-          { "scene_type": "detail", "source": "camera", "caption_max_chars": 24, "min_record_sec": 3, "guide": "단면이나 질감이 보이게 찍어주세요", "guide_image": "detail" }
+          { "scene_type": "closeup", "source": "camera", "caption_max_chars": 18, "min_record_sec": 3, "guide": "가로로 들고 가까이서 천천히 찍어주세요", "guide_image": "closeup" },
+          { "scene_type": "detail", "source": "camera", "caption_max_chars": 24, "min_record_sec": 3, "guide": "가로로 들고 단면이나 질감이 보이게 찍어주세요", "guide_image": "detail" }
         ],
         "menu_block_sec": { "1": 10.0, "2": 14.0, "3": 18.0 }
       }
@@ -89,6 +89,7 @@ BGM은 콘셉트별 곡 목록(`audio.bgm_tracks`, 심플 4곡·크리스마스 
 ```
 
 - 장면 순서: hook → 메뉴 1(closeup, detail) → … → 메뉴 n → outro. 이 순서의 0부터 시작하는 번호가 `scene_index`.
+- 촬영은 **가로 영상 기준**이다(2026-11-18). 가로 영상은 화면 전체를 가운데에 두고 위아래를 같은 영상의 흐린 사본으로 채운다(9:16로 잘라 확대하지 않는다, 템플릿 `render.landscape_fit`). 세로 영상이 들어와도 거절하지 않고 화면을 꽉 채워 쓴다.
 - `min_record_sec`보다 짧으면 프론트가 재촬영을 요청한다(SC-04).
 - `guide_image`는 메뉴 종류와 무관한 공통 구도 샘플 이름(이미지는 앱에 포함).
 - `caption_max_chars`는 SC-06 글자 수 제한에 그대로 쓴다. 현재 2종 모두 `has_captions`가 true다. 기능명세서의 자막 없는 템플릿 분기를 위해 필드는 남겨 두며, false면 대본 API를 호출하지 않고 SC-06을 건너뛴다.

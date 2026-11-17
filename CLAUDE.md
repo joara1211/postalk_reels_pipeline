@@ -95,7 +95,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 지금 | 바꿀 방향 |
 |---|---|
 | `CUT_DURATION`=2초, `CAPTION_DURATION`=1초, 컷당 자막 2줄 고정 | 템플릿 JSON 기반 장면별 길이, 장면당 자막 1개, 메뉴 수에 따른 장면 수 |
-| 해상도 다르면 레터박스 | 세로 영상은 9:16 중앙 크롭으로 꽉 채우기. **가로 영상은 (2026-11-18 사용자 결정) 전체 화면을 가운데에 두고 위아래를 같은 영상의 흐린 사본으로 채움** — 중앙 크롭하면 폭의 1/3만 남아 너무 확대돼 보여서. 템플릿 `render.landscape_fit`(`mode: crop|blur`, 선택 `foreground_aspect`), `video_composer._frame_filter()` |
+| 해상도 다르면 레터박스 | 세로 영상은 9:16 중앙 크롭으로 꽉 채우기. **가로 영상은 (2026-11-18 사용자 결정) 전체 화면을 가운데에 두고 위아래를 같은 영상의 흐린 사본으로 채움** — 중앙 크롭하면 폭의 1/3만 남아 너무 확대돼 보여서. 템플릿 `render.landscape_fit`(`mode: crop|blur`, 선택 `foreground_aspect`), `video_composer._frame_filter()` 촬영 안내(`guide`)도 가로 촬영 기준으로 바꿈(세로 영상도 거절하지 않음). |
 | 짧은 클립은 `tpad` 정지 프레임 | 0.5배속 슬로우 → 반복 → (최후) 정지 프레임 |
 | 긴 클립은 앞부분 사용 | 앞뒤 흔들림 피해 중간 구간 사용 |
 | 마크다운 대본 파서 입력 | API JSON 장면 목록 입력(파서는 테스트용으로만 유지) |

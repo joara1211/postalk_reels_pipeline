@@ -21,7 +21,7 @@
         "duration_sec": 3.0,
         "caption_max_chars": 20,
         "min_record_sec": 3,
-        "guide": "대표 상품이 모두 보이게 찍어주세요",
+        "guide": "휴대폰을 가로로 들고 대표 상품이 모두 보이게 찍어주세요",
         "guide_image": "hook"
       },
       {
@@ -31,7 +31,7 @@
         "duration_sec": 3.0,
         "caption_max_chars": 20,
         "min_record_sec": 2,
-        "guide": "가게 모습이 담긴 영상을 골라주세요",
+        "guide": "가게 모습이 담긴 가로 영상을 골라주세요",
         "guide_image": "outro"
       }
     ],
@@ -41,7 +41,7 @@
         "source": "camera",
         "caption_max_chars": 18,
         "min_record_sec": 3,
-        "guide": "가까이서 천천히 찍어주세요",
+        "guide": "가로로 들고 가까이서 천천히 찍어주세요",
         "guide_image": "closeup"
       },
       {
@@ -49,7 +49,7 @@
         "source": "camera",
         "caption_max_chars": 24,
         "min_record_sec": 3,
-        "guide": "단면이나 질감이 보이게 찍어주세요",
+        "guide": "가로로 들고 단면이나 질감이 보이게 찍어주세요",
         "guide_image": "detail"
       }
     ],
