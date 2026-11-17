@@ -1,18 +1,18 @@
-# 릴스 API 명세 (초안)
+# 릴스 내부 API 명세
 
-프론트 기능명세서(SC-00~SC-09, 백엔드 요청 사항)와 최종 기획안 기준. 원본 문서: POSTALK 릴스 파이프라인 문서의 "릴스 API 명세 (초안)" 탭.
+POSTALK 백엔드와 릴스 서비스의 운영 연동을 설명한다. 배포와 호출 순서는 [백엔드 연동 안내](backend-integration.md)를 참고한다.
 
 ## 1. 개요
 
 릴스는 대본(script)과 생성(render) 두 작업으로 나뉜다. 프론트는 Next.js 백엔드를 호출하고, Next.js가 아래 릴스 API를 호출한다. 프론트는 미디어 서버를 직접 호출하지 않는다.
 
-| 프론트 요청 (기능명세서 4장) | 화면 | 릴스 API |
-| --- | --- | --- |
-| 대본 생성 요청 | SC-03 | POST /reels/scripts |
-| 대본 결과 조회 | SC-06 | GET /reels/scripts/{script_id} |
-| 생성 요청 | SC-07 | POST /reels/renders |
-| 생성 상태 조회 | SC-07 | GET /reels/renders/{render_id} (백엔드가 조회) |
-| (장면 구성 정의) | SC-02, SC-04 | GET /reels/templates |
+| 백엔드 작업 | 릴스 API |
+| --- | --- |
+| 마지막 영상 제출 후 대본 생성 | POST /reels/scripts |
+| 대본 결과 조회 | GET /reels/scripts/{script_id} |
+| 완성된 대본과 영상으로 렌더링 요청 | POST /reels/renders |
+| 렌더링 상태 조회 | GET /reels/renders/{render_id} |
+| 콘셉트·장면 규칙 조회 | GET /reels/templates |
 
 대본 API는 자막을 쓰는 템플릿에서만 호출한다. 재료 업로드, 광고 목록·상세, 캡션 수정, 게시, 삭제는 Next.js가 처리하며 릴스 API 범위가 아니다.
 
@@ -24,21 +24,22 @@
 
 공통 규칙
 
-- 사용자는 고정 계정 user_id = 1. 가게 이름·주소는 입력받지 않으므로 Next.js가 회원 정보에서 채워 보낸다.
-- 파일은 Supabase Storage로 주고받는다(2026-11-02 결정: S3 연동은 하지 않는다). 릴스 서비스는 Supabase 비밀 키를 갖지 않고, 백엔드가 발급한 **서명 URL**로만 원본을 내려받고 결과를 올린다. `media[].key`와 `result.video_key`·`thumbnail_key`는 `uploads` 버킷 안의 객체 경로이며, 브라우저에서 열리는 URL로 바꾸는 것은 Next.js가 맡는다. `storage` 필드는 `supabase`여야 한다.
-- 렌더링 목표 1건당 30초 이내. 결과물은 1080×1920 MP4(H.264/AAC), 16~24초(2026-11-16 변경, 이전 13~15초).
+- 운영 백엔드는 내부 요청의 `user_id`에 `1`을 넣고 제작 세션의 가게·메뉴 정보를 전달한다. 작업 공간 접근 권한은 백엔드에서 확인한다.
+- 운영 요청은 `storage: "supabase"`와 입력 객체 키·서명 다운로드 URL, 결과용 서명 업로드 URL을 사용한다. 프론트에는 백엔드가 발급한 결과 미리보기 URL을 전달한다.
+- `GET /healthz`를 제외한 운영 요청은 `x-reels-api-key`를 사용한다. 키가 다르면 401, `SUPABASE_URL`을 설정한 상태에서 서비스 키가 없으면 503이다.
+- 결과물은 1080×1920 MP4(H.264/AAC)이며 메뉴 1·2·3개에 따라 16·20·24초다.
 - 시간은 ISO 8601, 길이는 초, 처리 시간은 밀리초.
 
 ## 2. 템플릿과 장면 구성
 
-장면 수는 메뉴 수에 따라 달라진다(SC-03, SC-04). 공통 장면 2개(훅·마무리)에 메뉴마다 2개(클로즈업·디테일)를 더한다. 장면 규칙은 2종 템플릿 공통이고, 메뉴 수가 늘면 전체 길이가 16·20·24초로 늘어나되, 메뉴 장면 하나는 최소 3초를 지켜 2줄 자막을 읽을 시간을 준다.
+장면 수는 메뉴 수에 따라 달라진다. 공통 장면 2개(훅·마무리)에 메뉴마다 2개(클로즈업·디테일)를 더한다. 두 콘셉트 모두 메뉴 장면당 최소 3초를 배정한다.
 
 | 순서 | 장면(scene_type) | 대상 | 재료 | 자막 내용 |
 | --- | --- | --- | --- | --- |
-| 1 | hook | 가게 | 촬영 (대표 상품 전체) | 가게 이름 + 한 줄 소개 |
+| 1 | hook | 가게 | 간판 영상 | 가게 이름 + 한 줄 소개 |
 | 메뉴마다 | closeup | 메뉴 n | 촬영 | 메뉴명 |
 | 메뉴마다 | detail | 메뉴 n | 촬영 | 특징, 가격(설명에 있을 때) |
-| 마지막 | outro | 가게 | 갤러리 (가게 장면) | 방문 유도 문구 |
+| 마지막 | outro | 가게 | 가게 입구 영상 | 방문 유도 문구 |
 
 | 메뉴 수 | 장면 수 | 촬영 + 갤러리 | 메뉴 장면 길이 | 전체 길이 |
 | --- | --- | --- | --- | --- |
@@ -46,10 +47,7 @@
 | 2 | 6 | 5 + 1 | 3.5초 | 20초 |
 | 3 | 8 | 7 + 1 | 3초 | 24초 |
 
-훅과 마무리는 항상 3초. 자막 최대 글자 수(공백 포함)는 훅 20, 클로즈업 18, 디테일 24, 마무리 20자(2026-11-16, 2줄 자막 기준). "메뉴 장면 길이"는 메뉴 하나가 받는 평균치다 — 2026-11-02부로 같은 메뉴의 클로즈업/디테일을
-무조건 반반으로 나누지 않고, 실제로 더 길게 찍은 장면에 더 많은 시간을 준다(평균치의 0.5~2배 범위 안에서). 메뉴 하나의
-합계와 전체 길이(16·20·24초)는 항상 이 표대로 정확히 지켜진다 — 바뀌는 건 그 메뉴 안에서 클로즈업과 디테일이 어떻게
-나뉘는지뿐이다. 가격 입력란이 없으므로(SC-03) 가격은 메뉴 설명에서 대본 생성 시 추출하고, 없으면 특징만 넣는다.
+훅과 마무리는 각각 3초다. 메뉴 장면 길이는 장면당 평균이며, 하나의 메뉴에 배정된 시간 안에서 원본 길이와 최소 장면 길이를 기준으로 클로즈업과 디테일을 나눈다. 자막 제한은 훅·클로즈업·디테일·마무리 순으로 20·18·24·20자다.
 
 콘셉트별 자막·오디오
 
@@ -58,7 +56,7 @@
 | simple | 심플 | 사용 | BGM |
 | christmas | 크리스마스 | 사용 | BGM |
 
-릴스와 카드뉴스 모두 이 2종 콘셉트를 쓴다. 컷 속도, 전환, 자막 스타일, 색, BGM 곡 같은 디자인은 아직 정해지지 않았다. 모두 템플릿 JSON 값으로만 정하므로, 확정되면 API와 코드 변경 없이 반영한다.
+릴스의 전환·자막 스타일·BGM은 콘셉트별 템플릿 JSON을 따른다.
 
 BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지 않는다. TTS 내레이션은 쓰지 않는다(2026-11-02 결정) — 영상 소리는 BGM뿐이다. 촬영 원본 소리는 모두 제거한다.
 
@@ -73,7 +71,7 @@ BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지
       "concept": "simple",
       "name": "심플",
       "has_captions": true,
-      "audio": { "bgm": "simple_01", "bgm_volume": 0.3 },
+      "audio": { "bgm": "assets/bgm/MP_맑은 아침 (Short).mp3", "bgm_volume": 0.3 },
       "scene_rule": {
         "common": [
           { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 3, "guide": "대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
@@ -99,7 +97,7 @@ BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지
 
 ### POST /reels/scripts
 
-SC-03에서 다음을 누르는 시점에 호출하고 응답을 기다리지 않는다. `has_captions`가 true인 콘셉트에서만 호출한다.
+운영 백엔드는 마지막 영상 제출로 생성 작업을 시작한 뒤 대본을 요청한다.
 
 요청
 
@@ -117,7 +115,7 @@ SC-03에서 다음을 누르는 시점에 호출하고 응답을 기다리지 �
 }
 ```
 
-- `store.name`은 Next.js가 회원 정보에서 채운다. `store.description`은 SC-03 가게 설명.
+- `store.name`과 `store.description`에는 제작 세션의 가게 이름과 소개를 전달한다.
 - `menus`는 1~3개. `menu_index`는 입력 순서(0부터)이며 재료·장면을 연결하는 메뉴 식별값.
 
 응답 (202 Accepted)
@@ -128,7 +126,7 @@ SC-03에서 다음을 누르는 시점에 호출하고 응답을 기다리지 �
 
 ### GET /reels/scripts/{script_id}
 
-SC-06에 진입하면 status가 done이 될 때까지 조회한다.
+백엔드는 약 0.5초 간격으로 대본 상태를 조회하고 `done`이 되면 렌더링을 요청한다.
 
 ```json
 {
@@ -149,14 +147,14 @@ SC-06에 진입하면 status가 done이 될 때까지 조회한다.
 
 - status: `pending` | `done` | `failed`.
 - `target`은 SC-06 "장면 대상 표시"에 그대로 쓴다. `text`는 화면에 뜨는 자막 문장(TTS 없음).
-- LLM이 1회 재시도 후에도 실패하면 기본 문구에 가게명·메뉴명만 넣어 done으로 돌려주고 `is_fallback: true`. failed는 입력값이 잘못된 경우에만 나오며, SC-06 재요청 버튼은 같은 요청을 다시 보낸다.
-- caption·hashtags는 생성 요청에 그대로 넘기고, SC-08에서 사용자가 수정한다. 인스타그램 제한(본문 2,200자, 해시태그 30개) 안에서 만든다.
+- AI를 사용할 수 없거나 유효한 응답을 얻지 못하면 기본 자막·캡션·해시태그를 생성해 `done`, `is_fallback: true`로 반환한다. 대본 작업 자체가 실패하면 `failed`와 `error`를 반환한다.
+- 백엔드는 `scenes`, `caption`, `hashtags`를 렌더링 요청에 전달하고 캡션과 해시태그를 생성 결과에 저장한다.
 
 ## 4. 생성 요청
 
 ### POST /reels/renders
 
-SC-07에서 재료 업로드가 끝난 뒤 Next.js가 호출한다. `ad_id`는 Next.js가 만든 광고 ID이고, 릴스 API는 이 값을 그대로 기록한다.
+영상 업로드와 대본 생성이 끝난 뒤 백엔드가 호출한다. `ad_id`에는 백엔드 생성 작업 ID를 사용한다.
 
 요청
 
@@ -170,10 +168,10 @@ SC-07에서 재료 업로드가 끝난 뒤 Next.js가 호출한다. `ad_id`는 N
     { "menu_index": 0, "name": "창억떡", "description": "쫀득한 식감, 한 팩 5,000원" }
   ],
   "media": [
-    { "scene_index": 0, "menu_index": null, "key": "1/ad_20261120_0042/0.mp4", "storage": "supabase", "download_url": "https://<project>.supabase.co/storage/v1/object/sign/uploads/1/ad_20261120_0042/0.mp4?token=..." },
-    { "scene_index": 1, "menu_index": 0, "key": "1/ad_20261120_0042/1.mp4", "storage": "supabase", "download_url": "https://<project>.supabase.co/storage/v1/object/sign/uploads/1/ad_20261120_0042/1.mp4?token=..." },
-    { "scene_index": 2, "menu_index": 0, "key": "1/ad_20261120_0042/2.mp4", "storage": "supabase", "download_url": "https://<project>.supabase.co/storage/v1/object/sign/uploads/1/ad_20261120_0042/2.mp4?token=..." },
-    { "scene_index": 3, "menu_index": null, "key": "1/ad_20261120_0042/3.mp4", "storage": "supabase", "download_url": "https://<project>.supabase.co/storage/v1/object/sign/uploads/1/ad_20261120_0042/3.mp4?token=..." }
+    { "scene_index": 0, "menu_index": null, "key": "stores/example/video_clip/0.mp4", "storage": "supabase", "download_url": "장면 0 서명 다운로드 URL" },
+    { "scene_index": 1, "menu_index": 0, "key": "stores/example/video_clip/1.mp4", "storage": "supabase", "download_url": "장면 1 서명 다운로드 URL" },
+    { "scene_index": 2, "menu_index": 0, "key": "stores/example/video_clip/2.mp4", "storage": "supabase", "download_url": "장면 2 서명 다운로드 URL" },
+    { "scene_index": 3, "menu_index": null, "key": "stores/example/video_clip/3.mp4", "storage": "supabase", "download_url": "장면 3 서명 다운로드 URL" }
   ],
   "uploads": {
     "video_url": "https://<project>.supabase.co/storage/v1/object/upload/sign/uploads/1/ad_20261120_0042/generated/ad_20261120_0042.mp4?token=...",
@@ -186,21 +184,18 @@ SC-07에서 재료 업로드가 끝난 뒤 Next.js가 호출한다. `ad_id`는 N
     { "scene_index": 3, "text": "오늘 바로 들러주세요" }
   ],
   "caption": "30년 전통 방식 그대로, 해오름 떡집 창억떡을 만나보세요.",
-  "hashtags": ["#창억떡", "#떡집", "#동네맛집"]
+  "hashtags": ["#창억떡", "#떡집", "#동네맛집"],
+  "uploads": {
+    "video_url": "MP4 서명 업로드 URL",
+    "thumbnail_url": "JPG 서명 업로드 URL"
+  }
 }
 ```
 
 - `media`는 장면마다 영상 1개. 기능명세서의 "장면 번호, 메뉴 식별값"이 `scene_index`와 `menu_index`.
-- `scenes`는 SC-06에서 확정한 자막 목록. `has_captions`가 false인 콘셉트(현재 없음)는 scenes와 caption·hashtags를 빼고 보내며, 이때 릴스 API가 캡션·해시태그를 새로 만든다.
-- 자막이 max_chars를 넘으면 `400 CAPTION_TOO_LONG`, 장면 수가 메뉴 수 규칙과 다르면 `400 SCENE_MISMATCH`. 같은 `scene_index`가 두 번 들어와도 `SCENE_MISMATCH`.
-- `ad_id`는 영문·숫자·`_`·`-`만, 최대 100자. 어기면 `400 INVALID_AD_ID`.
-- 서명 URL 규칙 (어기면 `400 INVALID_RENDER_INPUT`):
-  - 모든 URL은 서비스의 `SUPABASE_URL`과 같은 https 프로젝트 주소이고 `token` 쿼리가 있어야 한다.
-  - `media[].download_url`은 `/storage/v1/object/sign/uploads/<key>` 형태이고, 그 `<key>`가 `media[].key`와 같아야 한다.
-  - `uploads.video_url`은 `/storage/v1/object/upload/sign/uploads/.../generated/<ad_id>.mp4`, `uploads.thumbnail_url`은 같은 경로의 `.jpg`여야 한다.
-  - 원본 영상과 결과 파일은 각각 최대 50MB.
-- 서비스에 `SUPABASE_URL`이 설정돼 있으면 `uploads`는 필수다. `uploads` 없는 요청은 로컬 개발 전용이며, 이때는 `key`를 `STORAGE_ROOT` 밑 로컬 파일 경로로 읽는다.
-- (미구현) 비어 있거나 읽을 수 없는 장면은 같은 메뉴의 다른 장면, 그다음 다른 장면 영상으로 대체하고 `fallbacks`에 기록한다. 지금은 대체하지 않고 실패 처리하며 `fallbacks`는 항상 빈 배열이다.
+- `scenes`는 대본 응답에서 가져온 자막 목록이다. `uploads`에는 같은 생성 경로의 `<ad_id>.mp4`와 `<ad_id>.jpg`용 URL을 넣는다.
+- 자막이 max_chars를 넘으면 `400 CAPTION_TOO_LONG`, 장면 수가 메뉴 수 규칙과 다르면 `400 SCENE_MISMATCH`.
+- 현재 렌더 응답의 `fallbacks`는 빈 배열이다. 다운로드나 합성에 실패하면 작업 상태와 오류 코드를 확인한다.
 
 응답 (202 Accepted)
 
@@ -210,15 +205,13 @@ SC-07에서 재료 업로드가 끝난 뒤 Next.js가 호출한다. `ad_id`는 N
 
 - `render_id`는 `rr_` + 32자리 16진수.
 - 같은 ad_id가 이미 queued나 rendering이면 `409 ALREADY_RENDERING`과 기존 render_id를 돌려준다.
-- `uploads`가 있는 요청에서 같은 ad_id가 이미 done이면 새로 렌더하지 않고 기존 render_id와 `"status": "done"`을 돌려준다. 백엔드가 같은 작업을 안전하게 다시 등록할 수 있게 하기 위해서다.
-- SC-07의 "다시 시도"는 같은 요청을 다시 보낸다. 이전 작업이 failed면 새 render_id가 발급된다.
-- 작업 상태는 서비스 프로세스 메모리에 있어서 재시작하면 사라진다. 이때 조회는 `404 NOT_FOUND`이며, 백엔드는 같은 요청을 다시 등록한다.
+- 같은 서명 업로드 작업이 이미 완료됐으면 기존 `render_id`와 `status: "done"`을 HTTP 202로 반환한다. 이전 작업이 실패한 경우 새 `render_id`를 받는다.
 
 ## 5. 생성 상태 조회
 
 ### GET /reels/renders/{render_id}
 
-SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. progress로 단계별 문구와 진행 표시를 보여주고, done이면 SC-08로 replace 이동한다.
+백엔드는 `done` 또는 `failed`까지 약 2초 간격으로 조회한다. 프론트는 공개 백엔드의 생성 진행률과 결과 API를 사용한다.
 
 ```json
 {
@@ -233,10 +226,10 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
     "percent": 100
   },
   "result": {
-    "video_key": "1/ad_20261120_0042/generated/ad_20261120_0042.mp4",
-    "thumbnail_key": "1/ad_20261120_0042/generated/ad_20261120_0042.jpg",
-    "video_bytes": 3145728,
-    "thumbnail_bytes": 143360,
+    "video_key": "store-id/submission-id/generated/ad_20261120_0042.mp4",
+    "thumbnail_key": "store-id/submission-id/generated/ad_20261120_0042.jpg",
+    "video_bytes": 1852104,
+    "thumbnail_bytes": 94218,
     "duration_sec": 16.0,
     "caption": "30년 전통 방식 그대로, 해오름 떡집 창억떡을 만나보세요.",
     "hashtags": ["#창억떡", "#떡집", "#동네맛집"],
@@ -270,7 +263,7 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
 | 3 | uploading | 거의 다 됐어요 |
 
 - TTS를 쓰지 않으므로(2026-11-02 결정) narrating 단계는 없다. stage_total은 항상 3. 프론트는 단계 목록을 고정하지 않고 stage_index / stage_total을 그대로 표시한다.
-- label은 릴스 API가 내려주므로 문구 수정 시 프론트 배포가 필요 없다.
+- 내부 진행률은 렌더 단계 기준이다. `uploading`의 `percent: 100`은 업로드 단계에 진입했다는 뜻이며, 성공 여부는 `status: "done"`으로 확인한다. 프론트에 표시하는 생성 진행률은 공개 백엔드가 관리한다.
 
 오류 코드 (error.code)
 
@@ -288,50 +281,8 @@ SC-07은 done 또는 failed가 될 때까지 2초 간격으로 조회한다. pro
 | RENDER_FAILED | FFmpeg 실패(자동 재시도 1회 후), 원본 다운로드 실패, 결과 업로드 실패 | failed, 다시 시도 |
 | TIMEOUT | 60초 초과 | failed, 다시 시도 |
 
-- 인증 오류는 error.code 없이 HTTP 상태로만 온다: `401`(키 불일치), `503`(서비스에 키 미설정).
-- 원본 다운로드·업로드 실패는 서명 URL이 로그에 남지 않도록 상세 원인 없이 `RENDER_FAILED`로만 알린다.
+요청 단계의 HTTP 오류는 FastAPI의 `detail`에 담긴다. 수락한 작업이 실패하면 상태 조회 응답의 `error`에 코드와 메시지가 들어간다.
 
 error에는 code와 함께 안내 문구(message)를 넣는다.
 
-### 상태 전달 (조회 우선, 콜백은 선택)
-
-POSTALK 백엔드 연동은 **상태 조회 방식**이다. 백엔드가 `GET /reels/renders/{render_id}`를 주기적으로 호출해 생성 작업에 반영하고, 프론트는 백엔드의 진행률 API만 2~3초 간격으로 조회한다.
-
-콜백 기능도 코드에 남아 있지만, 릴스 서비스에 `NEXT_BASE_URL`이 설정된 경우에만 보낸다(현재 연동에서는 설정하지 않음).
-
-`POST {NEXT_BASE_URL}/api/internal/reels/callback` (헤더 `X-Internal-Api-Key: <REELS_CALLBACK_API_KEY>`)
-
-- 본문은 상태 조회 응답과 같고, `sent_at`을 더한다.
-- 받는 쪽은 render_id와 sent_at으로 중복·순서 뒤바뀜을 무시한다.
-
-## 6. 확인 필요 사항
-
-준서 (프론트)
-
-- [ ] 메뉴당 2장면(closeup·detail) 규칙과 촬영 횟수(메뉴 3개면 촬영 7회 + 갤러리 1회) 괜찮은지
-- [ ] 릴스 콘셉트 2종 모두 자막을 쓰므로, 릴스는 항상 SC-06을 거치는 것으로 봐도 되는지
-- [ ] 가격 입력란 없이 메뉴 설명에서 가격을 뽑는 방식으로 충분한지
-- [ ] 장면 구성 정의를 앱에 넣을지, GET /reels/templates로 받을지
-- [ ] SC-06 "배경음악은 사용하지 않는다"를 "배경음악은 콘셉트 기본곡을 쓰며 선택 기능은 없다"로 고칠지
-
-성준 (API·인프라)
-
-- [x] 작업 등록 방식: 백엔드가 Railway 내부 주소로 직접 호출(SQS 없음)
-- [x] 서버 간 인증: `x-reels-api-key` + `REELS_INTERNAL_API_KEY`. 상태는 콜백 대신 백엔드가 조회
-- [x] 스토리지: S3가 아니라 Supabase Storage를 쓴다(2026-11-02 확인)
-- [x] Supabase Storage: `uploads` 버킷, 서명 URL로만 주고받음, 결과는 `.../generated/<ad_id>.mp4|.jpg`
-- [ ] user_id = 1 회원 정보의 가게 이름을 요청에 채워 보내는지
-- [ ] 광고 삭제 시 Supabase Storage 결과 파일도 지울지
-- [ ] 해커톤 FastAPI 코드의 기존 엔드포인트를 유지할지, 이 명세로 바꿀지
-
-지우 (이미지 AI)
-
-- [ ] 캡션·해시태그 생성을 카드뉴스와 공유할지
-- [ ] 콘셉트 ID(simple, christmas)와 이름 통일, 콘셉트별 색·폰트 규칙(디자인 확정 시)
-
-기획안 수정 필요
-
-- 3.3절 "공통 장면 5개"는 메뉴 수에 따라 장면이 늘어나는 규칙으로 바뀐다.
-- 3.1·3.3절의 콘셉트 3종(시장형·숏폼형·브이로그형)은 심플·크리스마스 2종으로 바뀐다.
-- 두 콘셉트의 디자인(컷 속도, 전환, 자막, 색, BGM)은 팀에서 정한 뒤 템플릿 JSON에 반영한다.
-- TTS 내레이션을 전제로 한 절(있다면)은 삭제한다 — 2026-11-02부로 TTS를 쓰지 않기로 했다. 영상 소리는 BGM뿐이다.
+운영 백엔드는 상태 조회 API로 작업을 확인한다. 릴스 서비스의 선택적 콜백은 `NEXT_BASE_URL`을 설정한 경우 `POST {NEXT_BASE_URL}/api/internal/reels/callback`을 호출한다. 본문은 상태 조회 응답에 `sent_at`을 추가한 형태이며, `REELS_CALLBACK_API_KEY`가 있으면 `X-Internal-Api-Key` 헤더로 전달한다.

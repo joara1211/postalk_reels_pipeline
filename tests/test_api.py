@@ -57,6 +57,17 @@ class ApiTestCase(unittest.TestCase):
 
 
 class TestHealthzAndTemplates(ApiTestCase):
+    def test_internal_openapi_documents_render_contract(self):
+        paths = self.client.get("/openapi.json").json()["paths"]
+        render = paths["/reels/renders"]["post"]["responses"]
+        self.assertTrue({"202", "400", "401", "409", "422", "503"} <= render.keys())
+        self.assertEqual(
+            render["409"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ActiveRenderError",
+        )
+        for path in ("/reels/scripts/{script_id}", "/reels/renders/{render_id}"):
+            self.assertTrue({"200", "401", "404", "503"} <= paths[path]["get"]["responses"].keys())
+
     def test_healthz(self):
         response = self.client.get("/healthz")
         self.assertEqual(response.status_code, 200)

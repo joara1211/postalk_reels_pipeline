@@ -40,7 +40,96 @@ def require_internal_auth(x_reels_api_key: str = Header(default="")) -> None:
         raise HTTPException(401, "Invalid reels service credentials")
 
 
-router = APIRouter(prefix="/reels", dependencies=[Depends(require_internal_auth)])
+class AuthError(BaseModel):
+    detail: str
+
+
+class JobErrorDetail(BaseModel):
+    code: str
+    message: str
+
+
+class JobError(BaseModel):
+    detail: JobErrorDetail
+
+
+class ActiveRenderDetail(BaseModel):
+    code: Literal["ALREADY_RENDERING"]
+    render_id: str
+
+
+class ActiveRenderError(BaseModel):
+    detail: ActiveRenderDetail
+
+
+class ScriptAccepted(BaseModel):
+    script_id: str
+    status: Literal["pending"]
+
+
+class RenderAccepted(BaseModel):
+    render_id: str
+    ad_id: str
+    status: Literal["queued", "done"]
+
+
+class ScriptScene(BaseModel):
+    scene_index: int
+    scene_type: str
+    menu_index: int | None
+    target: str
+    text: str
+    max_chars: int
+
+
+class ScriptStatus(BaseModel):
+    script_id: str
+    status: Literal["pending", "done", "failed"]
+    is_fallback: bool | None
+    scenes: list[ScriptScene] | None
+    caption: str | None
+    hashtags: list[str] | None
+    error: JobErrorDetail | None
+
+
+class RenderProgress(BaseModel):
+    stage: Literal["preparing", "composing", "uploading"]
+    stage_index: int
+    stage_total: int
+    label: str
+    percent: int
+
+
+class RenderResult(BaseModel):
+    video_key: str
+    thumbnail_key: str
+    video_bytes: int | None = None
+    thumbnail_bytes: int | None = None
+    duration_sec: float
+    caption: str
+    hashtags: list[str]
+    render_ms: int
+    fallbacks: list[dict]
+
+
+class RenderStatus(BaseModel):
+    render_id: str
+    ad_id: str
+    status: Literal["queued", "rendering", "done", "failed"]
+    progress: RenderProgress | None
+    result: RenderResult | None
+    error: JobErrorDetail | None
+    updated_at: str
+
+
+router = APIRouter(
+    prefix="/reels",
+    dependencies=[Depends(require_internal_auth)],
+    responses={
+        401: {"model": AuthError, "description": "Invalid reels service credentials."},
+        503: {"model": AuthError, "description": "Internal API key is not configured."},
+    },
+)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +250,10 @@ def _process_script(script_id: str, store: dict, menus: list[dict], template: di
         )
 
 
-@router.post("/scripts", status_code=202)
+@router.post("/scripts", status_code=202, responses={
+    202: {"model": ScriptAccepted},
+    400: {"model": JobError, "description": "Invalid concept or menu count."},
+})
 def post_scripts(body: ScriptRequestIn, background_tasks: BackgroundTasks) -> dict:
     template = _load_template_or_400(body.concept)
     menus = [m.model_dump() for m in body.menus]
@@ -175,7 +267,10 @@ def post_scripts(body: ScriptRequestIn, background_tasks: BackgroundTasks) -> di
     return {"script_id": job.script_id, "status": job.status}
 
 
-@router.get("/scripts/{script_id}")
+@router.get("/scripts/{script_id}", responses={
+    200: {"model": ScriptStatus},
+    404: {"model": JobError, "description": "Script job not found."},
+})
 def get_script(script_id: str) -> dict:
     job = job_store.store.get_script(script_id)
     if job is None:
@@ -291,7 +386,11 @@ def _render_to_storage(
     job_store.send_callback(job_store.store.get_render(render_id))
 
 
-@router.post("/renders", status_code=202)
+@router.post("/renders", status_code=202, responses={
+    202: {"model": RenderAccepted, "description": "Render accepted, or a completed signed-upload job was reused."},
+    400: {"model": JobError, "description": "Invalid concept, menu count, scenes, captions, identifier or storage URLs."},
+    409: {"model": ActiveRenderError, "description": "Render already active. Poll the render_id in detail."},
+})
 def post_renders(body: RenderRequestIn, background_tasks: BackgroundTasks) -> dict:
     template = _load_template_or_400(body.concept)
     request = RenderRequest.from_dict(body.model_dump())
@@ -333,7 +432,10 @@ def post_renders(body: RenderRequestIn, background_tasks: BackgroundTasks) -> di
     return {"render_id": job.render_id, "ad_id": job.ad_id, "status": job.status}
 
 
-@router.get("/renders/{render_id}")
+@router.get("/renders/{render_id}", responses={
+    200: {"model": RenderStatus},
+    404: {"model": JobError, "description": "Render job not found."},
+})
 def get_render(render_id: str) -> dict:
     job = job_store.store.get_render(render_id)
     if job is None:

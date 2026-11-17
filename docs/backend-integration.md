@@ -7,7 +7,7 @@
 | 구성 요소 | 담당 역할 | 외부 공개 여부 |
 | --- | --- | --- |
 | 프론트엔드 | 영상 업로드, 릴스 생성 시작, 백엔드 진행률 표시 | 공개 |
-| POSTALK 백엔드 | 세션·파일 검증, Supabase 서명 URL 발급, 릴스 작업 상태와 결과 저장 | 공개 |
+| POSTALK 백엔드 | 세션·파일 검증, Supabase 서명 URL 발급, 생성 결과 저장과 Instagram 게시 | 공개 |
 | 릴스 파이프라인 | 메뉴 수에 따른 4·6·8개 영상 다운로드, AI 자막·BGM·전환 합성, MP4·썸네일 업로드 | Railway 내부 전용 |
 | Supabase Storage | 원본 영상, 완성 MP4, 썸네일 보관 | 서명 URL로만 접근 |
 
@@ -16,14 +16,15 @@
 ## 2. 실제 생성 흐름
 
 1. 사용자가 프론트에서 영상을 올리면 백엔드가 Supabase Storage에 저장한다.
-2. 백엔드는 릴스 세션에서 네 개 장면을 순서대로 연결한다. 기본 순서는 간판, 대표 메뉴, 대표 메뉴 상세, 가게 입구다.
-3. 네 번째 영상이 제출되면 백엔드는 생성 작업을 만들고, 각 원본의 서명 다운로드 URL과 결과 MP4·썸네일의 서명 업로드 URL을 발급한다.
-4. 백엔드는 Railway 내부 주소의 `POST /reels/renders`를 호출한다.
+2. 백엔드는 간판, 메뉴별 클로즈업·상세, 가게 입구 순으로 영상을 연결한다. 메뉴 1·2·3개에 각각 4·6·8개 영상이 필요하다.
+3. 마지막 영상이 제출되면 백엔드는 생성 작업을 만들고, 각 원본의 서명 다운로드 URL과 결과 MP4·썸네일의 서명 업로드 URL을 발급한다.
+4. 백엔드는 `POST /reels/scripts`로 대본 생성을 시작하고 완료될 때까지 약 0.5초 간격으로 조회한다. 응답의 장면 자막·캡션·해시태그를 `POST /reels/renders`에 전달한다.
 5. 릴스 서비스는 원본 현장음을 제거하고 템플릿의 자막, 전환, BGM을 적용해 세로형 MP4를 생성한다.
 6. MP4와 JPG 썸네일을 백엔드가 지정한 Supabase 경로에 올린다.
-7. 백엔드는 릴스 서비스의 상태 조회 결과를 생성 작업에 반영한다. 프론트는 백엔드의 진행률 API만 2~3초 간격으로 조회한다.
+7. 백엔드는 릴스 상태를 약 2초 간격으로 조회해 공개 생성 작업에 반영한다. 프론트는 백엔드의 생성 진행률 API를 조회한다.
 
 현재 백엔드 연동 콘셉트는 `simple`, `christmas` 두 가지다. TTS는 사용하지 않으며 원본 영상의 소리는 결과물에 포함하지 않는다.
+메뉴 1·2·3개에 따른 결과 길이는 각각 16·20·24초다.
 
 ## 3. 백엔드 호출 계약
 
@@ -48,8 +49,8 @@
 | `store` | 예 | 가게 이름과 소개 |
 | `menus` | 예 | 1~3개 대표 메뉴 |
 | `media` | 예 | 장면별 Storage 키와 Supabase 서명 다운로드 URL |
-| `scenes` | 예 | 백엔드가 만든 장면별 자막 |
-| `caption`, `hashtags` | 선택 | 게시물 본문과 해시태그 |
+| `scenes` | 예 | 대본 API에서 생성한 장면별 자막 |
+| `caption`, `hashtags` | 운영 요청에 포함 | 대본 API에서 생성한 게시물 본문과 해시태그 |
 | `uploads` | 예 | MP4·JPG용 Supabase 서명 업로드 URL |
 
 `media` 항목은 `storage: "supabase"`여야 하며, `key`와 `download_url`은 같은 Supabase 객체를 가리켜야 한다. 결과 파일 이름은 각각 `<ad_id>.mp4`, `<ad_id>.jpg`로 끝나는 생성 경로여야 한다. 서비스는 입력·출력 URL이 현재 `SUPABASE_URL` 프로젝트의 유효한 서명 URL인지 검증한다.
@@ -60,13 +61,17 @@
 { "render_id": "rr_123", "ad_id": "<job-id>", "status": "queued" }
 ```
 
-백엔드는 `GET /reels/renders/{render_id}`로 상태를 조회한다. 상태는 `queued`, `rendering`, `done`, `failed` 중 하나이며, 완료되면 MP4·썸네일 Storage 키, 영상 길이, 캡션, 해시태그가 포함된다.
+백엔드는 `GET /reels/renders/{render_id}`로 상태를 조회한다. 상태는 `queued`, `rendering`, `done`, `failed` 중 하나이며, 완료되면 MP4·썸네일 Storage 키와 바이트 수, 영상 길이, 캡션, 해시태그가 포함된다.
+
+같은 작업이 대기 또는 처리 중이면 `409 ALREADY_RENDERING`의 `detail.render_id`로 조회를 이어간다. 같은 서명 업로드 작업이 이미 완료된 경우 서비스는 HTTP 202와 기존 `render_id`, `status: "done"`을 반환한다. 상태 조회가 HTTP 404이면 백엔드는 같은 요청을 한 번 다시 등록한다.
+
+내부 Swagger(`/docs`)에서 대본·렌더링 요청과 상태 응답, 인증·입력 오류를 확인할 수 있다.
 
 ## 4. 환경 변수
 
 | 변수 | 릴스 서비스 | 백엔드 | 설명 |
 | --- | --- | --- | --- |
-| `SUPABASE_URL` | 필요 | 필요 | 같은 Supabase 프로젝트 URL. 릴스 서비스에서는 서명 URL 검증에 사용 |
+| Supabase 프로젝트 URL | `SUPABASE_URL` | `NEXT_PUBLIC_SUPABASE_URL` | 두 서비스가 같은 프로젝트를 사용해야 함 |
 | `REELS_INTERNAL_API_KEY` | 필요 | 필요 | 서버 간 인증용 공유 비밀 값 |
 | `REELS_API_URL` | 불필요 | 필요 | Railway 내부 릴스 서비스 주소 |
 | `PORT` | 필요 | 불필요 | 기본 예시 `8000` |
@@ -82,9 +87,9 @@
 3. 백엔드에 `REELS_API_URL=http://postalk-reels.railway.internal:8000`과 동일한 `REELS_INTERNAL_API_KEY`를 설정한다.
 4. 릴스 서비스 로그에서 FFmpeg가 포함된 컨테이너가 정상 기동하는지 확인한다.
 5. `GET /healthz`와 백엔드의 준비 상태 확인을 각각 수행한다.
-6. 메뉴 1개 영상 4개와 메뉴 2개 영상 6개로 각각 생성 작업을 실행하고, 결과 MP4·JPG가 Supabase에 저장되는지 확인한다.
+6. 메뉴 수에 맞춰 영상 4·6·8개가 제출되는지와 결과 MP4·JPG가 Supabase에 저장되는지 확인한다.
 
-작업 상태는 현재 Python 프로세스 메모리에 보관한다. 서비스가 재시작되면 진행 중이던 `render_id`를 잃을 수 있으므로, 백엔드는 실패 또는 미완료 작업을 안전하게 다시 등록할 수 있어야 한다.
+작업 상태는 Python 프로세스 메모리에 보관한다. 서비스 재시작으로 렌더 상태를 잃으면 백엔드의 HTTP 404 재등록 경로가 동작한다.
 
 ## 6. 장애 확인 순서
 
@@ -95,8 +100,8 @@
 | `400 INVALID_RENDER_INPUT` | 백엔드 렌더 요청 | 서명 URL·Storage 키·결과 경로 불일치 |
 | `400 SCENE_MISMATCH` 또는 `CAPTION_TOO_LONG` | 자막·장면 입력 | 템플릿 장면 규칙을 벗어난 요청 |
 | `409 ALREADY_RENDERING` | 동일 `ad_id`의 현재 작업 | 이미 큐 대기 또는 렌더링 중. 기존 `render_id` 조회 |
-| `failed / NO_USABLE_MEDIA` | 입력 영상과 서비스 로그 | 내려받은 영상을 읽을 수 없음(사용할 수 있는 영상 없음) |
-| `failed / RENDER_FAILED` | 릴스 Railway 로그 | FFmpeg 합성, Supabase 원본 다운로드 또는 결과 업로드 실패 |
+| `failed / NO_USABLE_MEDIA` | 입력 영상과 서비스 로그 | 내려받은 영상 중 읽을 수 있는 파일이 없음 |
+| `failed / RENDER_FAILED` | 릴스 Railway 로그 | FFmpeg 합성, Supabase 다운로드 또는 업로드 실패 |
 
 오류를 공유할 때는 작업 ID와 오류 코드만 사용하고, 다운로드 URL·업로드 URL·내부 키를 포함하지 않는다.
 

@@ -2,7 +2,7 @@
 
 POSTALK 백엔드가 전달한 영상 4·6·8개를 세로형 릴스로 합성하는 내부 서비스입니다. 메뉴 수는 1~3개이며, 각 메뉴에 클로즈업과 상세 장면을 배정합니다. 원본 영상의 소리는 제거하고, AI 자막·전환·배경음악을 적용해 MP4와 썸네일을 만듭니다. 프론트엔드는 이 서비스에 직접 요청하지 않습니다.
 
-현재 백엔드 연동은 `simple`, `christmas` 두 콘셉트를 사용합니다. 릴스 결과는 1080×1920 MP4, 메뉴 1·2·3개에 따라 16·20·24초이며 Supabase Storage 서명 URL로만 입력과 출력을 주고받습니다.
+현재 백엔드 연동은 `simple`, `christmas` 두 콘셉트를 사용합니다. 릴스 결과는 1080×1920 MP4이며, 메뉴 1·2·3개에 따라 각각 16·20·24초입니다. Supabase Storage 서명 URL로 입력과 출력을 주고받습니다.
 
 ## 실행 환경
 
@@ -13,7 +13,7 @@ POSTALK 백엔드가 전달한 영상 4·6·8개를 세로형 릴스로 합성�
 | `REELS_INTERNAL_API_KEY` | 백엔드와 공유하는 내부 호출 키 |
 | `OPENAI_API_KEY` | AI가 장면 자막·게시글 캡션·해시태그를 생성할 때 필요 |
 | `OPENAI_MODEL` | 선택한 대본 생성 모델. 기본값은 `gpt-4.1-mini` |
-| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` | 선택. 로컬 테스트용 대체 AI 제공자. 키가 여러 개면 OpenAI → Anthropic → Gemini 순으로 쓰고, `LLM_PROVIDER`로 강제 지정 |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL` | 선택. 대체 제공자와 모델 설정. 기본 선택 순서는 OpenAI → Anthropic → Gemini이며, `LLM_PROVIDER`로 지정 가능 |
 
 Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백엔드의 `REELS_API_URL`은 `http://<service>.railway.internal:8000` 형식이며, 두 서비스의 `REELS_INTERNAL_API_KEY` 값은 같아야 합니다. `OPENAI_API_KEY`가 없거나 AI 응답이 형식에 맞지 않으면, 서비스는 빈 해시태그를 반환하지 않고 기본 캡션·해시태그로 안전하게 대체합니다.
 
@@ -25,7 +25,7 @@ Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백�
 | --- | --- |
 | `GET /healthz` | 서비스 상태 확인 |
 | `GET /reels/templates` | 사용할 수 있는 콘셉트와 장면 규칙 조회 |
-| `POST /reels/scripts` | 선택 기능. 자막·캡션·해시태그 초안 생성 |
+| `POST /reels/scripts` | 운영 백엔드가 렌더링 전에 장면 자막·캡션·해시태그 생성 요청 |
 | `GET /reels/scripts/:scriptId` | 대본 작업 상태 조회 |
 | `POST /reels/renders` | 릴스 렌더링 시작 |
 | `GET /reels/renders/:renderId` | 렌더링 상태와 결과 조회 |
@@ -40,9 +40,17 @@ Railway에서는 공개 도메인 대신 내부 주소를 사용합니다. 백�
   "store": { "name": "가게 이름", "description": "가게 소개" },
   "menus": [{ "menu_index": 0, "name": "대표 메뉴" }],
   "media": [
-    { "scene_index": 0, "menu_index": null, "key": "Storage 경로", "storage": "supabase", "download_url": "서명 다운로드 URL" }
+    { "scene_index": 0, "menu_index": null, "key": "stores/example/video_clip/sign.mp4", "storage": "supabase", "download_url": "간판 서명 다운로드 URL" },
+    { "scene_index": 1, "menu_index": 0, "key": "stores/example/video_clip/closeup.mp4", "storage": "supabase", "download_url": "메뉴 클로즈업 서명 다운로드 URL" },
+    { "scene_index": 2, "menu_index": 0, "key": "stores/example/video_clip/detail.mp4", "storage": "supabase", "download_url": "메뉴 상세 서명 다운로드 URL" },
+    { "scene_index": 3, "menu_index": null, "key": "stores/example/video_clip/entrance.mp4", "storage": "supabase", "download_url": "가게 입구 서명 다운로드 URL" }
   ],
-  "scenes": [{ "scene_index": 0, "text": "화면 자막" }],
+  "scenes": [
+    { "scene_index": 0, "text": "가게 소개" },
+    { "scene_index": 1, "text": "대표 메뉴" },
+    { "scene_index": 2, "text": "한 입의 즐거움" },
+    { "scene_index": 3, "text": "가게 입구" }
+  ],
   "caption": "게시물 본문",
   "hashtags": ["#시장맛집"],
   "uploads": {

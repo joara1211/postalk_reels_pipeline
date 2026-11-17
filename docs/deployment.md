@@ -6,11 +6,12 @@ POSTALK 백엔드와 같은 Railway 프로젝트 및 환경에 이 저장소를 
 | --- | --- |
 | `SUPABASE_URL` | POSTALK 백엔드와 같은 Supabase 프로젝트의 HTTPS URL |
 | `REELS_INTERNAL_API_KEY` | POSTALK 백엔드와 공유하는 비밀 값 |
-| `OPENAI_API_KEY` | 백엔드 서비스의 같은 이름 변수를 Railway 참조로 연결. AI 자막·캡션·해시태그 생성에 사용 |
+| `OPENAI_API_KEY` | 선택. AI 자막·캡션·해시태그 생성에 사용하며, 키가 없으면 기본 문구로 생성 |
+| `OPENAI_MODEL` | 선택. 대본 생성 모델, 기본값 `gpt-4.1-mini` |
 | `PORT` | 백엔드 내부 URL에 넣을 서비스 포트. 예시는 `8000` |
 
 POSTALK 백엔드에는 `REELS_API_URL=http://<릴스 서비스 이름>.railway.internal:8000`과 같은 `REELS_INTERNAL_API_KEY`를 설정합니다. 릴스 서비스가 호출하는 Supabase URL은 작업에 필요한 다운로드 및 업로드 URL로 한정됩니다. Supabase 서비스 역할 키는 백엔드에서 관리합니다.
 
 `POST /reels/renders`는 장면별 `media[].download_url`과 결과 저장용 `uploads.video_url`, `uploads.thumbnail_url`을 받습니다. 백엔드는 같은 작업 ID로 등록을 다시 요청하고, 상태 조회로 완료를 확인합니다. 렌더 작업 상태는 Python 프로세스에 저장되며 재시작하면 백엔드에서 작업을 다시 등록합니다. 완성 영상과 썸네일은 Supabase에 저장합니다.
 
-영상에 템플릿의 배경음악과 자막이 들어갑니다. 원본 영상의 현장음은 제거합니다. 릴스 서비스가 장면 자막·게시글 캡션·해시태그를 생성하므로 `OPENAI_API_KEY`가 필요합니다.
+영상에 템플릿의 배경음악과 자막이 들어갑니다. 원본 영상의 현장음은 제거합니다. 백엔드가 렌더링 전에 대본 API를 호출해 장면 자막·게시글 캡션·해시태그를 받습니다.
