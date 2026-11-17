@@ -1,12 +1,14 @@
 """Composes the final MP4 in a single ffmpeg pass: each scene's source clip
 is fit to its target duration (middle-trim if long enough, slow-down if
 short, slow-down + repeat for very short clips), cropped to fill the 9:16
-canvas, concatenated, burned with ASS captions, faded in/out, and mixed
+canvas (or, for landscape clips when the template asks for it, shown whole
+over a blurred copy of itself — see _frame_filter()), concatenated, burned with ASS captions, faded in/out, and mixed
 with BGM. Per-scene audio is never used — on-site sound is removed entirely.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import subprocess
@@ -82,6 +84,37 @@ def probe_duration(video_path: Path, *, deadline: float | None = None) -> float:
     return float(result.stdout.strip())
 
 
+def probe_display_aspect(video_path: Path, *, deadline: float | None = None) -> float:
+    """Width/height of the first video stream *as displayed* — phone footage
+    often stores 1920x1080 pixels with a 90-degree rotation tag, which
+    ffmpeg auto-rotates to portrait, so the rotation has to be applied
+    here too or a portrait clip would be mistaken for landscape."""
+    result = _run(
+        [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height:stream_side_data=rotation",
+            "-of", "json",
+            str(video_path),
+        ],
+        deadline=deadline,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    stream = json.loads(result.stdout)["streams"][0]
+    width, height = int(stream["width"]), int(stream["height"])
+    rotation = next(
+        (int(float(d["rotation"])) for d in stream.get("side_data_list", []) if "rotation" in d), 0
+    )
+    if abs(rotation) % 180 == 90:
+        width, height = height, width
+    return width / height
+
+
 def probe_mean_volume_db(audio_path: Path, *, deadline: float | None = None) -> float:
     """Mean loudness (dBFS) of a media file's audio track, via ffmpeg's
     volumedetect filter."""
@@ -118,6 +151,42 @@ class SceneClip:
     media_path: Path
     target_duration: float  # seconds, from the scene plan
     src_duration_sec: float  # seconds, probed from the actual media file
+    src_aspect: float | None = None  # displayed width/height; None = unknown (treated as fill-crop)
+
+
+def _frame_filter(label_in: str, label_out: str, clip: SceneClip, *, width: int, height: int,
+                  fps: int, landscape_fit: dict | None) -> list[str]:
+    """Fit one scene's frames onto the `width`x`height` canvas.
+
+    Default: scale up and center-crop to fill the canvas. For a landscape
+    source that throws away about two thirds of the frame and looks far too
+    zoomed in, so when the template sets `render.landscape_fit.mode` to
+    "blur", a clip wider than it is tall is instead shown as a centered
+    foreground — center-cropped only to `foreground_aspect` (width/height,
+    e.g. 1.0 = square; omitted = keep the whole frame) and scaled to the
+    canvas width — over a blurred, darkened, fill-cropped copy of itself."""
+    fill = (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},fps={fps},setsar=1"
+    )
+    mode = (landscape_fit or {}).get("mode", "crop")
+    if mode != "blur" or clip.src_aspect is None or clip.src_aspect <= 1.0:
+        return [f"[{label_in}]{fill}[{label_out}]"]
+
+    fg_aspect = landscape_fit.get("foreground_aspect")
+    fg_aspect = clip.src_aspect if fg_aspect is None else max(float(fg_aspect), width / height)
+    fg_aspect = min(fg_aspect, clip.src_aspect)
+    blur = int(landscape_fit.get("blur", 12))
+    dim = float(landscape_fit.get("background_brightness", -0.12))
+    small_w, small_h = width // 4, height // 4  # blur at quarter size: much cheaper, looks the same
+    return [
+        f"[{label_in}]split=2[{label_out}_bgsrc][{label_out}_fgsrc]",
+        f"[{label_out}_bgsrc]scale={small_w}:{small_h}:force_original_aspect_ratio=increase,"
+        f"crop={small_w}:{small_h},boxblur={blur}:2,scale={width}:{height},"
+        f"eq=brightness={dim}[{label_out}_bg]",
+        f"[{label_out}_fgsrc]crop=w='min(iw,ih*{fg_aspect:.4f})':h=ih,scale={width}:-2[{label_out}_fg]",
+        f"[{label_out}_bg][{label_out}_fg]overlay=(W-w)/2:(H-h)/2,fps={fps},setsar=1[{label_out}]",
+    ]
 
 
 def _fit_duration_filter(label_in: str, label_out: str, src_duration: float, target_duration: float) -> list[str]:
@@ -212,6 +281,7 @@ def build_ffmpeg_command(
     height: int = config.VIDEO_HEIGHT,
     fps: int = config.FPS,
     preset: str = config.FFMPEG_PRESET,
+    landscape_fit: dict | None = None,
 ) -> list[str]:
     """Build the ffmpeg argv for the compose step. Pure/testable: does not
     touch the filesystem or require ffmpeg to be installed.
@@ -270,9 +340,8 @@ def build_ffmpeg_command(
     v_labels: list[str] = []
     for i, clip in enumerate(scene_clips):
         filters += _fit_duration_filter(f"{i}:v", f"vfit{i}", clip.src_duration_sec, fit_durations[i])
-        filters.append(
-            f"[vfit{i}]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},fps={fps},setsar=1[v{i}]"
+        filters += _frame_filter(
+            f"vfit{i}", f"v{i}", clip, width=width, height=height, fps=fps, landscape_fit=landscape_fit
         )
         v_labels.append(f"v{i}")
 
@@ -371,11 +440,13 @@ def compose_video(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    needs_aspect = (kwargs.get("landscape_fit") or {}).get("mode", "crop") != "crop"
     scene_clips = [
         SceneClip(
             media_path=media_path,
             target_duration=target_duration,
             src_duration_sec=probe_duration(media_path, deadline=deadline),
+            src_aspect=probe_display_aspect(media_path, deadline=deadline) if needs_aspect else None,
         )
         for media_path, target_duration in scene_specs
     ]

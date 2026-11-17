@@ -390,3 +390,59 @@ class TestComputeBgmGainDb(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLandscapeFit(unittest.TestCase):
+    def _cmd(self, aspect, landscape_fit):
+        from src.quote_video.video_composer import SceneClip, build_ffmpeg_command
+
+        clips = [SceneClip(Path("a.mp4"), 3.0, 5.0, src_aspect=aspect)]
+        cmd = build_ffmpeg_command(
+            clips, Path("s.ass"), Path("b.mp3"), Path("o.mp4"),
+            bgm_volume=0.3, fade_duration=0.5, font_name="F", margin_v=100, landscape_fit=landscape_fit,
+        )
+        return cmd[cmd.index("-filter_complex") + 1]
+
+    def test_portrait_clip_is_always_fill_cropped(self):
+        graph = self._cmd(9 / 16, {"mode": "blur"})
+        self.assertNotIn("boxblur", graph)
+        self.assertIn("crop=1080:1920", graph)
+
+    def test_landscape_clip_with_crop_mode_is_fill_cropped(self):
+        graph = self._cmd(16 / 9, {"mode": "crop"})
+        self.assertNotIn("boxblur", graph)
+        graph = self._cmd(16 / 9, None)
+        self.assertNotIn("boxblur", graph)
+
+    def test_landscape_clip_with_blur_mode_keeps_whole_frame_over_blurred_copy(self):
+        graph = self._cmd(16 / 9, {"mode": "blur"})
+        self.assertIn("split=2", graph)
+        self.assertIn("boxblur", graph)
+        self.assertIn(f"ih*{16 / 9:.4f}", graph)  # foreground keeps the full width
+        self.assertIn("overlay=(W-w)/2:(H-h)/2", graph)
+
+    def test_foreground_aspect_crops_sides_but_never_past_the_canvas_or_source(self):
+        self.assertIn("ih*1.0000", self._cmd(16 / 9, {"mode": "blur", "foreground_aspect": 1.0}))
+        self.assertIn(f"ih*{1080 / 1920:.4f}", self._cmd(16 / 9, {"mode": "blur", "foreground_aspect": 0.1}))
+        self.assertIn(f"ih*{4 / 3:.4f}", self._cmd(4 / 3, {"mode": "blur", "foreground_aspect": 3.0}))
+
+    def test_unknown_aspect_falls_back_to_fill_crop(self):
+        self.assertNotIn("boxblur", self._cmd(None, {"mode": "blur"}))
+
+
+class TestProbeDisplayAspect(unittest.TestCase):
+    def _probe(self, stream):
+        import json as _json
+        from types import SimpleNamespace
+
+        from src.quote_video import video_composer
+
+        with patch.object(video_composer, "_run", return_value=SimpleNamespace(stdout=_json.dumps({"streams": [stream]}))):
+            return video_composer.probe_display_aspect(Path("x.mp4"))
+
+    def test_landscape(self):
+        self.assertAlmostEqual(self._probe({"width": 1920, "height": 1080}), 16 / 9)
+
+    def test_rotated_phone_clip_is_portrait(self):
+        stream = {"width": 1920, "height": 1080, "side_data_list": [{"rotation": -90}]}
+        self.assertAlmostEqual(self._probe(stream), 9 / 16)
