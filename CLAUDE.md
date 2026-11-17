@@ -51,7 +51,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `assets/overlay/christmas_border_placeholder.png`(생성한 임시 테두리)가 걸려있고, `simple.json`은 없음 — 지우가 실제
   디자인 주면 그 경로만 바꾸면 된다.
 - **TTS는 쓰지 않는다** (2026-11-02 결정, 이전 "TTS 사용" 결정을 뒤집음). 영상에는 음성 내레이션이 없고 자막과 BGM만 있다.
-- **BGM은 쓴다.** 콘셉트별 기본곡 1곡, 사용자 선택 기능 없음. 덕킹 대상(TTS)이 없으므로 덕킹도 없다.
+- **BGM은 쓴다.** 사용자 선택 기능 없음. 덕킹 대상(TTS)이 없으므로 덕킹도 없다.
+  **(2026-11-17)** 콘셉트별 곡 목록 `audio.bgm_tracks`에서 렌더마다 무작위 1곡(`pipeline.pick_bgm_path()`) — 심플 4곡(기존 맑은 아침 + CC0 3곡),
+  크리스마스 3곡(CC0). 새 곡은 원곡 앞 40초를 잘라 약 -17 LUFS로 맞춘 MP3. **곡은 CC0·퍼블릭 도메인만** 넣고 출처를 `assets/bgm/CREDITS.md`에 적는다
+  (공개 레포 + 공식 인스타 게시). Wikimedia 파일 서버(upload.wikimedia.org)는 연락처 없는 자동 다운로드를 429로 막으므로 Internet Archive에서 받았다.
 - **촬영 원본 소리는 모두 제거**한다(기존 코드의 "현장음 유지" 규칙은 폐기).
 - **자막은 화면 표시용 텍스트**(내레이션 대본이 아니다). 장면당 자막 1개, 장면별 최대 글자 수 제한.
 - **가격 입력란은 없다.** 메뉴 설명에서 LLM이 가격을 뽑아 detail 장면에 넣고, 없으면 생략.

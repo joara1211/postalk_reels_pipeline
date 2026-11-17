@@ -35,6 +35,27 @@ class TestLoadTemplate(unittest.TestCase):
         self.assertEqual(simple["scene_rule"], christmas["scene_rule"])
 
 
+
+class TestBgmPools(unittest.TestCase):
+    """Each concept rotates through its own pool of BGM tracks."""
+
+    def test_each_concept_has_at_least_three_tracks_on_disk(self):
+        from src.quote_video import config
+
+        for concept in ("simple", "christmas"):
+            audio = templates.load_template(concept)["audio"]
+            tracks = audio["bgm_tracks"]
+            self.assertGreaterEqual(len(tracks), 3, concept)
+            self.assertEqual(len(tracks), len(set(tracks)), concept)
+            self.assertIn(audio["bgm"], tracks, concept)  # default stays part of the pool
+            for track in tracks:
+                self.assertTrue((config.REPO_ROOT / track).is_file(), track)
+
+    def test_concepts_do_not_share_tracks(self):
+        simple = set(templates.load_template("simple")["audio"]["bgm_tracks"])
+        christmas = set(templates.load_template("christmas")["audio"]["bgm_tracks"])
+        self.assertFalse(simple & christmas)
+
 class TestBuildScenePlan(unittest.TestCase):
     def setUp(self):
         self.template = templates.load_template("simple")

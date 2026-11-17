@@ -145,3 +145,36 @@ class TestRunPipelineMediaValidation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBgmSelection(unittest.TestCase):
+    def test_picks_one_track_from_the_pool(self):
+        import random
+
+        from src.quote_video.pipeline import pick_bgm_path
+
+        audio = {"bgm": "a.mp3", "bgm_tracks": ["a.mp3", "b.mp3", "c.mp3"]}
+        pool = {config.REPO_ROOT / t for t in audio["bgm_tracks"]}
+        picks = {pick_bgm_path(audio, random.Random(seed)) for seed in range(50)}
+        self.assertTrue(picks <= pool)
+        self.assertEqual(picks, pool)  # every track gets a turn over enough renders
+
+    def test_falls_back_to_single_bgm_without_a_pool(self):
+        from src.quote_video.pipeline import pick_bgm_path
+
+        self.assertEqual(pick_bgm_path({"bgm": "only.mp3"}), config.REPO_ROOT / "only.mp3")
+
+    def test_run_pipeline_passes_a_track_from_the_concept_pool(self):
+        import random
+
+        from src.quote_video.templates import load_template
+
+        with patch("src.quote_video.pipeline.compose_video") as mock_compose:
+            mock_compose.return_value = Path("output/final.mp4")
+            for concept in ("simple", "christmas"):
+                request = RenderRequest.from_json_file(FIXTURE)
+                request = RenderRequest(**{**request.__dict__, "concept": concept})
+                result = run_pipeline(request, MEDIA_ROOT, Path("output/final.mp4"), rng=random.Random(1))
+                pool = {config.REPO_ROOT / t for t in load_template(concept)["audio"]["bgm_tracks"]}
+                self.assertIn(mock_compose.call_args.kwargs["bgm_path"], pool)
+                self.assertEqual(result.bgm_path, mock_compose.call_args.kwargs["bgm_path"])

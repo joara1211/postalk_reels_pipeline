@@ -3,7 +3,14 @@
   "name": "심플",
   "has_captions": true,
   "audio": {
+    "_note": "bgm_tracks 중 한 곡을 렌더마다 무작위로 고른다(pipeline.pick_bgm_path). bgm은 기본곡(목록에도 포함). 출처·라이선스는 assets/bgm/CREDITS.md",
     "bgm": "assets/bgm/MP_맑은 아침 (Short).mp3",
+    "bgm_tracks": [
+      "assets/bgm/MP_맑은 아침 (Short).mp3",
+      "assets/bgm/simple_go_to_the_picnic.mp3",
+      "assets/bgm/simple_ice_cream_with_you.mp3",
+      "assets/bgm/simple_sweet_sun.mp3"
+    ],
     "bgm_volume": 0.3
   },
   "scene_rule": {

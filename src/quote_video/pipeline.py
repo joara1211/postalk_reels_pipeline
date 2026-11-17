@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,11 +27,23 @@ from .subtitle_sync import CaptionLine, CaptionTiming, write_ass
 from .templates import load_template, rebalance_menu_scene_durations
 from .video_composer import compose_video, probe_duration
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class PipelineResult:
     output_path: Path
     duration_sec: float
+    bgm_path: Path | None = None
+
+
+def pick_bgm_path(audio_cfg: dict, rng: random.Random | None = None) -> Path:
+    """One BGM track for this render. `audio.bgm_tracks` (a list of paths
+    relative to the repo root) is the concept's pool — a track is picked at
+    random per render so consecutive reels don't all sound the same. A
+    template without a pool falls back to its single `audio.bgm`."""
+    tracks = audio_cfg.get("bgm_tracks") or [audio_cfg["bgm"]]
+    return config.REPO_ROOT / (rng or random).choice(tracks)
 
 
 def run_pipeline(
@@ -41,6 +55,7 @@ def run_pipeline(
     build_dir: Path | None = None,
     timeout_seconds: float | None = config.PIPELINE_TIMEOUT_SECONDS,
     on_stage: Callable[[str], None] | None = None,
+    rng: random.Random | None = None,
 ) -> PipelineResult:
     """Run the full pipeline for one render request.
 
@@ -130,7 +145,8 @@ def run_pipeline(
         alternating_colors=tuple(alternating_colors) if alternating_colors else None,
     )
 
-    bgm_path = config.REPO_ROOT / template["audio"]["bgm"]
+    bgm_path = pick_bgm_path(template["audio"], rng)
+    logger.info("BGM for this render: %s", bgm_path.name)
     transition_cfg = render_cfg["transition"]
     overlay_cfg = render_cfg.get("overlay")
     overlay_path = config.REPO_ROOT / overlay_cfg["image"] if overlay_cfg else None
@@ -160,7 +176,7 @@ def run_pipeline(
         preset=render_cfg.get("ffmpeg_preset", config.FFMPEG_PRESET),
         deadline=deadline,
     )
-    return PipelineResult(output_path=output_path, duration_sec=sum(d for _, d in scene_specs))
+    return PipelineResult(output_path=output_path, duration_sec=sum(d for _, d in scene_specs), bgm_path=bgm_path)
 
 
 def main() -> None:

@@ -58,7 +58,7 @@ POSTALK 백엔드와 릴스 서비스의 운영 연동을 설명한다. 배포�
 
 릴스의 전환·자막 스타일·BGM은 콘셉트별 템플릿 JSON을 따른다.
 
-BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지 않는다. TTS 내레이션은 쓰지 않는다(2026-11-02 결정) — 영상 소리는 BGM뿐이다. 촬영 원본 소리는 모두 제거한다.
+BGM은 콘셉트별 곡 목록(`audio.bgm_tracks`, 심플 4곡·크리스마스 3곡)에서 렌더마다 한 곡을 무작위로 고른다(2026-11-17 변경, 이전엔 콘셉트별 1곡). 사용자가 고르는 기능은 두지 않는다. 곡 출처와 라이선스는 `assets/bgm/CREDITS.md`. TTS 내레이션은 쓰지 않는다(2026-11-02 결정) — 영상 소리는 BGM뿐이다. 촬영 원본 소리는 모두 제거한다.
 
 ### GET /reels/templates
 
@@ -71,7 +71,7 @@ BGM은 콘셉트별 기본곡을 쓰고, 사용자가 고르는 기능은 두지
       "concept": "simple",
       "name": "심플",
       "has_captions": true,
-      "audio": { "bgm": "assets/bgm/MP_맑은 아침 (Short).mp3", "bgm_volume": 0.3 },
+      "audio": { "bgm": "assets/bgm/MP_맑은 아침 (Short).mp3", "bgm_tracks": ["assets/bgm/MP_맑은 아침 (Short).mp3", "assets/bgm/simple_go_to_the_picnic.mp3", "..."], "bgm_volume": 0.3 },
       "scene_rule": {
         "common": [
           { "scene_type": "hook", "position": "first", "source": "camera", "duration_sec": 3.0, "caption_max_chars": 20, "min_record_sec": 3, "guide": "대표 상품이 모두 보이게 찍어주세요", "guide_image": "hook" },
